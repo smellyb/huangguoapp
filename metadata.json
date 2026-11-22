@@ -1,0 +1,5 @@
+{
+  "name": "Huangguoapp",
+  "description": "Web application starter workspace for huangguoapp built with React, TypeScript, Vite, and Tailwind CSS.",
+  "requestFramePermissions": []
+}

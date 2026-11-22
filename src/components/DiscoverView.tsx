@@ -21,6 +21,7 @@ interface DiscoverViewProps {
   onPlayDrama: (drama: Drama, episodeNumber?: number) => void;
   onToggleFollow: (dramaId: string) => void;
   onOpenSearch: () => void;
+  onOpenLineSelector?: () => void;
 }
 
 const FILTER_OPTIONS = [
@@ -45,6 +46,7 @@ export function DiscoverView({
   onPlayDrama,
   onToggleFollow,
   onOpenSearch,
+  onOpenLineSelector,
 }: DiscoverViewProps) {
   const [activeFilter, setActiveFilter] = useState<FilterOption>('全部');
   const [rankingTab, setRankingTab] = useState<RankingType>('hot');
@@ -97,22 +99,46 @@ export function DiscoverView({
       {warning && (
         <div
           role="status"
-          className="rounded-2xl bg-[#14161D] border border-amber-500/30 px-4 py-3 text-xs sm:text-sm text-amber-200/95"
+          className="rounded-2xl bg-[#14161D] border border-amber-500/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs sm:text-sm text-amber-200/95"
         >
-          {warning}
+          <div className="flex items-center gap-2">
+            <span className="text-amber-400">⚠️</span>
+            <span>{warning}</span>
+          </div>
+          {onOpenLineSelector && (
+            <button
+              type="button"
+              onClick={onOpenLineSelector}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] font-bold text-xs inline-flex items-center gap-1.5 transition-colors self-start sm:self-auto shrink-0 shadow-md shadow-amber-500/10"
+            >
+              <span>切换可用直连线路</span>
+            </button>
+          )}
         </div>
       )}
 
-      {/* Mobile quick search trigger */}
-      <div className="md:hidden">
+      {/* Mobile quick search & line trigger */}
+      <div className="md:hidden flex items-center gap-2">
         <button
           type="button"
           onClick={onOpenSearch}
-          className="w-full min-h-[44px] px-4 rounded-2xl bg-[#14161D] border border-white/[0.08] flex items-center gap-3 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+          className="flex-1 min-h-[44px] px-4 rounded-2xl bg-[#14161D] border border-white/[0.08] flex items-center gap-2.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
         >
           <Search className="w-4 h-4 text-amber-400 shrink-0" aria-hidden="true" />
-          <span className="truncate">搜索剧名、AI漫剧、悬疑、古风...</span>
+          <span className="truncate">搜索短剧、AI漫剧、题材...</span>
         </button>
+
+        {onOpenLineSelector && (
+          <button
+            type="button"
+            onClick={onOpenLineSelector}
+            aria-label="选择线路与测速"
+            className="min-h-[44px] px-3.5 rounded-2xl bg-[#14161D] border border-amber-500/30 text-amber-300 flex items-center gap-1.5 text-xs font-semibold shrink-0"
+          >
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>线路</span>
+          </button>
+        )}
       </div>
 
       {/* Topic drill-down header or Hero Spotlight */}

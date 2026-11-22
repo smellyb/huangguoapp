@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Clapperboard, Compass, Play, Search, User } from 'lucide-react';
+import { Clapperboard, Compass, Play, Search, User, Wifi, Zap } from 'lucide-react';
 import { DiscoverView } from './components/DiscoverView';
+import { LineSelectorModal } from './components/LineSelectorModal';
 import { ProfileView } from './components/ProfileView';
 import { SearchView } from './components/SearchView';
 import { TheaterPlayer } from './components/TheaterPlayer';
 import { DEMO_DRAMAS, DEMO_TOPICS } from './data/demoCatalog';
 import { useUserLibrary } from './hooks/useUserLibrary';
-import { loadDramaCatalog } from './services/dramaApi';
+import { fetchDramaDetail, loadDramaCatalog } from './services/dramaApi';
+import { DEFAULT_PERMANENT_DOMAINS, DEFAULT_SPEED_LINES } from './services/publishLines';
 import type { AppTab, Drama, Topic } from './types/drama';
 
 const NAV_ITEMS: { id: AppTab; label: string; icon: typeof Compass }[] = [
@@ -47,6 +49,27 @@ export default function App() {
     state.watchHistory[0]?.progressSeconds ?? 0
   );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isLineModalOpen, setIsLineModalOpen] = useState(false);
+
+  const currentLineLabel = useMemo(() => {
+    if (state.apiConfig.mode === 'demo' || !state.apiConfig.baseUrl) {
+      return '内置离线库';
+    }
+    const targetUrl = state.apiConfig.baseUrl.trim().replace(/\/+$/, '').toLowerCase();
+    const matched = [...DEFAULT_SPEED_LINES, ...DEFAULT_PERMANENT_DOMAINS].find(
+      (l) => l.url.trim().replace(/\/+$/, '').toLowerCase() === targetUrl
+    );
+    if (matched) {
+      return matched.name.split(' ')[0] || matched.name;
+    }
+    if (targetUrl === '/api-hg') return '本地代理';
+    try {
+      const u = new URL(state.apiConfig.baseUrl, window.location.origin);
+      return u.hostname || '自定义线路';
+    } catch {
+      return '自定义线路';
+    }
+  }, [state.apiConfig.mode, state.apiConfig.baseUrl]);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -90,6 +113,32 @@ export default function App() {
     () => dramas.find((d) => d.id === currentDramaId) ?? dramas[0] ?? DEMO_DRAMAS[0],
     [dramas, currentDramaId]
   );
+
+  // Automatically fetch full episode detail list for remote dramas
+  useEffect(() => {
+    if (!state.apiConfig.baseUrl || state.apiConfig.mode !== 'custom') return;
+    const drama = dramas.find((d) => d.id === currentDramaId);
+    if (!drama) return;
+
+    // If episodes are placeholders or have no detailed names, fetch real episode list
+    if (!drama.episodes || drama.episodes.length <= 1 || drama.episodes[0]?.title === '第 1 集') {
+      fetchDramaDetail(state.apiConfig.baseUrl, currentDramaId).then((detail) => {
+        if (!detail || !detail.episodes || detail.episodes.length === 0) return;
+        setDramas((prev) =>
+          prev.map((d) =>
+            d.id === currentDramaId
+              ? {
+                  ...d,
+                  episodes: detail.episodes,
+                  totalEpisodes: detail.totalEpisodes || detail.episodes.length,
+                  synopsis: detail.synopsis || d.synopsis,
+                }
+              : d
+          )
+        );
+      });
+    }
+  }, [currentDramaId, dramas, state.apiConfig.baseUrl, state.apiConfig.mode]);
 
   const openTheater = useCallback(
     (drama: Drama, episodeNum?: number, startSeconds?: number) => {
@@ -177,27 +226,40 @@ export default function App() {
             })}
           </nav>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (latestWatched) {
-                const target = dramas.find((d) => d.id === latestWatched.dramaId) ?? activeDrama;
-                openTheater(target, latestWatched.episodeNumber, latestWatched.progressSeconds);
-              } else {
-                openTheater(activeDrama, 1, 0);
-              }
-            }}
-            className="min-h-[40px] px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-sm font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
-            <span>{latestWatched ? '继续刷剧' : '进入剧场'}</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsLineModalOpen(true)}
+              className="min-h-[38px] px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-amber-500/30 text-xs text-slate-200 inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
+              title="切换短剧片源与网络线路 (huangguotv.github.io)"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span className="font-mono text-amber-300 font-semibold">{currentLineLabel}</span>
+              <span className="text-[11px] text-slate-400 border-l border-white/10 pl-1.5">换线</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (latestWatched) {
+                  const target = dramas.find((d) => d.id === latestWatched.dramaId) ?? activeDrama;
+                  openTheater(target, latestWatched.episodeNumber, latestWatched.progressSeconds);
+                } else {
+                  openTheater(activeDrama, 1, 0);
+                }
+              }}
+              className="min-h-[40px] px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-sm font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
+              <span>{latestWatched ? '继续刷剧' : '进入剧场'}</span>
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Mobile Compact Header (hidden in immersive Theater mode for maximum video height) */}
       {activeTab !== 'theater' && (
-        <header className="md:hidden sticky top-0 z-30 h-[52px] px-4 bg-[#0B0C10]/90 backdrop-blur-md border-b border-white/[0.08] flex items-center justify-between gap-4">
+        <header className="md:hidden sticky top-0 z-30 h-[52px] px-4 bg-[#0B0C10]/90 backdrop-blur-md border-b border-white/[0.08] flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={() => setActiveTab('discover')}
@@ -206,14 +268,26 @@ export default function App() {
             黄果短剧
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('search')}
-            aria-label="打开搜索"
-            className="min-h-[44px] min-w-[44px] flex items-center justify-end text-slate-300 hover:text-amber-400"
-          >
-            <Search className="w-5 h-5" aria-hidden="true" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setIsLineModalOpen(true)}
+              className="min-h-[34px] px-2.5 rounded-xl bg-white/[0.06] border border-amber-500/30 text-amber-300 text-xs font-semibold inline-flex items-center gap-1.5"
+              title="切换短剧线路"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="truncate max-w-[84px]">{currentLineLabel}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('search')}
+              aria-label="打开搜索"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-300 hover:text-amber-400"
+            >
+              <Search className="w-5 h-5" aria-hidden="true" />
+            </button>
+          </div>
         </header>
       )}
 
@@ -233,6 +307,7 @@ export default function App() {
             onPlayDrama={(drama, ep) => openTheater(drama, ep)}
             onToggleFollow={handleToggleFollow}
             onOpenSearch={() => setActiveTab('search')}
+            onOpenLineSelector={() => setIsLineModalOpen(true)}
           />
         )}
 
@@ -245,12 +320,14 @@ export default function App() {
             followedIds={state.followedIds}
             likedEpisodeKeys={state.likedEpisodeKeys}
             preferredQuality={state.apiConfig.preferredQuality}
+            apiBaseUrl={state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : undefined}
             onChangeQuality={(quality) => updateApiConfig({ preferredQuality: quality })}
             onSelectDramaEpisode={handleSelectDramaEpisode}
             onToggleFollow={handleToggleFollow}
             onToggleLike={handleToggleLike}
             onRecordProgress={recordProgress}
             onNotify={showToast}
+            onOpenLineSelector={() => setIsLineModalOpen(true)}
           />
         )}
 
@@ -258,6 +335,7 @@ export default function App() {
           <SearchView
             dramas={dramas}
             searchHistory={state.searchHistory}
+            apiBaseUrl={state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : undefined}
             onAddSearchTerm={addSearchTerm}
             onRemoveSearchTerm={removeSearchTerm}
             onClearSearchHistory={clearSearchHistory}
@@ -278,6 +356,7 @@ export default function App() {
             onClearHistory={clearHistory}
             onUpdateApiConfig={updateApiConfig}
             onNotify={showToast}
+            onOpenLineSelector={() => setIsLineModalOpen(true)}
           />
         )}
       </main>
@@ -336,6 +415,21 @@ export default function App() {
           {toastMessage}
         </div>
       )}
+
+      {/* Multi-Line & Server Selector Modal (huangguotv.github.io) */}
+      <LineSelectorModal
+        isOpen={isLineModalOpen}
+        onClose={() => setIsLineModalOpen(false)}
+        currentBaseUrl={state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : ''}
+        onSelectLine={(url, name) => {
+          if (!url) {
+            updateApiConfig({ mode: 'demo', baseUrl: '' });
+          } else {
+            updateApiConfig({ mode: 'custom', baseUrl: url });
+          }
+        }}
+        onNotify={showToast}
+      />
     </div>
   );
 }

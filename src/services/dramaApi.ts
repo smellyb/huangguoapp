@@ -1,12 +1,13 @@
 import { DEMO_DRAMAS, DEMO_TOPICS } from '../data/demoCatalog';
-import type { ApiConfig, Drama, Episode, RankingType, Topic } from '../types/drama';
+import type { ApiConfig, Drama, DramaCategory, DramaGenre, Episode, RankingType, Topic } from '../types/drama';
 
-const REQUEST_TIMEOUT_MS = 8000;
+const REQUEST_TIMEOUT_MS = 10000;
+export const DEFAULT_IMAGE_CDN = 'https://pic.qnlycc.cn';
 
 export function isValidHttpUrl(rawUrl: string): boolean {
   try {
-    const parsed = new URL(rawUrl.trim());
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    const parsed = new URL(rawUrl.trim(), window.location.origin);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' || rawUrl.startsWith('/');
   } catch {
     return false;
   }
@@ -16,11 +17,23 @@ export function normalizeBaseUrl(rawUrl: string): string {
   return rawUrl.trim().replace(/\/+$/, '');
 }
 
-async function fetchJsonWithTimeout<T>(url: string): Promise<T> {
-  if (!isValidHttpUrl(url)) {
-    throw new Error('接口地址必须以 http:// 或 https:// 开头');
+export function normalizeImageUrl(rawUrl?: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
   }
+  if (trimmed.startsWith('//')) {
+    return `https:${trimmed}`;
+  }
+  if (trimmed.startsWith('/')) {
+    return `${DEFAULT_IMAGE_CDN}${trimmed}`;
+  }
+  return `${DEFAULT_IMAGE_CDN}/${trimmed}`;
+}
 
+async function fetchJsonWithTimeout<T>(url: string): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -38,7 +51,7 @@ async function fetchJsonWithTimeout<T>(url: string): Promise<T> {
     return (await response.json()) as T;
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('请求超时（超过 8 秒），请检查接口连通性或 CORS 设置');
+      throw new Error('请求超时（超过 10 秒），请检查网络代理（如 127.0.0.1:7897）或 CORS 设置');
     }
     throw err instanceof Error ? err : new Error('网络请求失败');
   } finally {
@@ -51,90 +64,293 @@ function unwrapArray<T>(payload: unknown): T[] {
   if (payload && typeof payload === 'object') {
     const record = payload as Record<string, unknown>;
     if (Array.isArray(record.data)) return record.data as T[];
+    if (record.data && typeof record.data === 'object') {
+      const dataRecord = record.data as Record<string, unknown>;
+      if (Array.isArray(dataRecord.items)) return dataRecord.items as T[];
+      if (Array.isArray(dataRecord.list)) return dataRecord.list as T[];
+    }
     if (Array.isArray(record.items)) return record.items as T[];
     if (Array.isArray(record.list)) return record.list as T[];
   }
   return [];
 }
 
-function sanitizeSafeUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  const trimmed = value.trim();
-  if (trimmed.startsWith('/') || isValidHttpUrl(trimmed)) {
-    return trimmed;
+export interface HuangguoVideoItem {
+  id: number | string;
+  title: string;
+  desc?: string;
+  description?: string;
+  cover?: string;
+  hot?: number;
+  duration?: string | number;
+  cate_id?: string | number;
+  cate_name?: string;
+  score?: number;
+  tags?: string[];
+  badge?: string;
+  is_hot?: number;
+  is_original?: number;
+  episode_count?: number;
+  total_episodes?: number;
+  is_finished?: boolean;
+  episodes?: Array<{
+    ep_num: number;
+    title: string;
+    duration: number;
+    status?: number;
+  }>;
+  author?: {
+    name?: string;
+    avatar?: string;
+  };
+  play_at?: string;
+  created_at?: string;
+  metrics?: {
+    play?: number;
+    like?: number;
+    collect?: number;
+    comment?: number;
+  };
+  like_count?: number;
+  collect_count?: number;
+  comment_count?: number;
+}
+
+export interface HuangguoTopicItem {
+  id: number | string;
+  title: string;
+  slug?: string;
+  cover?: string;
+  intro?: string;
+  video_count?: number;
+}
+
+function deriveCategory(item: HuangguoVideoItem): DramaCategory {
+  const tagsStr = (item.tags || []).join(' ');
+  const title = item.title || '';
+  if (
+    tagsStr.includes('漫剧') ||
+    item.cate_id === 25 ||
+    item.cate_id === '25' ||
+    item.cate_name === '漫剧' ||
+    title.includes('漫剧')
+  ) {
+    return 'AI漫剧';
+  }
+  if (item.is_original === 1 || item.badge?.includes('原创') || item.badge === '黄果原创') {
+    return '原创短剧';
+  }
+  return 'AI短剧';
+}
+
+function deriveGenres(item: HuangguoVideoItem): DramaGenre[] {
+  const validGenres: DramaGenre[] = ['科幻', '古风', '悬疑', '都市', '机甲', '国风'];
+  const tags = item.tags || [];
+  const matched = tags.filter((t): t is DramaGenre => validGenres.includes(t as DramaGenre));
+  if (matched.length > 0) return matched;
+  if (tags.some((t) => t.includes('古') || t.includes('仙侠') || t.includes('武侠'))) return ['古风'];
+  if (tags.some((t) => t.includes('悬疑') || t.includes('灵异') || t.includes('恐怖'))) return ['悬疑'];
+  if (tags.some((t) => t.includes('科幻') || t.includes('系统') || t.includes('脑洞') || t.includes('游戏'))) return ['科幻'];
+  if (tags.some((t) => t.includes('国风') || t.includes('武侠'))) return ['国风'];
+  return ['都市'];
+}
+
+export function transformHuangguoItemToDrama(item: HuangguoVideoItem, index: number): Drama {
+  const posterUrl = normalizeImageUrl(item.cover) || DEMO_DRAMAS[index % DEMO_DRAMAS.length].posterUrl;
+  const totalEpisodes =
+    (typeof item.total_episodes === 'number' && item.total_episodes > 0 ? item.total_episodes : 0) ||
+    (typeof item.episode_count === 'number' && item.episode_count > 0 ? item.episode_count : 0) ||
+    (Array.isArray(item.episodes) && item.episodes.length > 0 ? item.episodes.length : 1);
+
+  const durationSec = Math.floor(Number(item.duration) || 90);
+
+  const episodes: Episode[] =
+    Array.isArray(item.episodes) && item.episodes.length > 0
+      ? item.episodes.map((ep) => ({
+          number: ep.ep_num,
+          title: ep.title || `第 ${ep.ep_num} 集`,
+          hook: '',
+          durationSeconds: Number(ep.duration) || durationSec,
+          subtitles: [],
+          posterUrl,
+        }))
+      : Array.from({ length: totalEpisodes }, (_, idx) => ({
+          number: idx + 1,
+          title: `第 ${idx + 1} 集`,
+          hook: '',
+          durationSeconds: durationSec,
+          subtitles: [],
+          posterUrl,
+        }));
+
+  const heat = item.hot ?? item.metrics?.play ?? (8500 - index * 100);
+  const playCountLabel =
+    heat >= 10000000
+      ? `${(heat / 10000000).toFixed(1)}千万热度`
+      : heat >= 10000
+        ? `${(heat / 10000).toFixed(1)}万热度`
+        : `${heat}热度`;
+
+  const synopsis = item.desc || item.description || '黄果短剧优质精选内容。';
+  const tagline = (item.tags && item.tags.length > 0) ? item.tags.slice(0, 3).join(' · ') : 'AI高能微短剧';
+
+  return {
+    id: String(item.id),
+    title: item.title || `短剧 ${item.id}`,
+    tagline,
+    category: deriveCategory(item),
+    genres: deriveGenres(item),
+    posterUrl,
+    heroUrl: posterUrl,
+    status: item.is_finished ? '已完结' : '连载中',
+    totalEpisodes,
+    updatedEpisodes: item.episode_count || totalEpisodes,
+    heatScore: heat,
+    playCountLabel,
+    likesBase: item.like_count ?? item.metrics?.like ?? 1500,
+    releaseYear: item.play_at?.slice(0, 4) || item.created_at?.slice(0, 4) || '2026',
+    studio: item.author?.name || (item.is_original ? '黄果原创' : '黄果短剧'),
+    synopsis,
+    topicIds: [],
+    isFeatured: Boolean(item.is_hot || index === 0),
+    isNew: Boolean(index < 6),
+    episodes,
+  };
+}
+
+export async function fetchEpisodeStreamUrl(
+  baseUrl: string,
+  dramaId: string,
+  episodeNumber: number
+): Promise<string | undefined> {
+  const base = normalizeBaseUrl(baseUrl);
+  const endpoint = `${base}/api/videos/${encodeURIComponent(dramaId)}/episodes/${episodeNumber}/playback`;
+  const fallbackEndpoint = `${base}/api/videos/${encodeURIComponent(dramaId)}/playback`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (res.ok) {
+      const payload = (await res.json()) as {
+        data?: {
+          streams?: {
+            main?: string;
+            hevc?: string;
+            preview?: string;
+          };
+        };
+      };
+      const stream = payload?.data?.streams?.main || payload?.data?.streams?.preview || payload?.data?.streams?.hevc;
+      if (stream) return stream;
+    }
+
+    const fallbackRes = await fetch(fallbackEndpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+    if (fallbackRes.ok) {
+      const payload = (await fallbackRes.json()) as {
+        data?: {
+          streams?: {
+            main?: string;
+            hevc?: string;
+            preview?: string;
+          };
+        };
+      };
+      return payload?.data?.streams?.main || payload?.data?.streams?.preview || payload?.data?.streams?.hevc;
+    }
+  } catch (err) {
+    console.warn(`[dramaApi] Failed to fetch playback for drama ${dramaId} ep ${episodeNumber}:`, err);
   }
   return undefined;
 }
 
-function normalizeEpisode(raw: Partial<Episode>, index: number, fallbackPoster: string): Episode {
-  const number = typeof raw.number === 'number' && raw.number > 0 ? raw.number : index + 1;
-  return {
-    number,
-    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : `第 ${number} 集`,
-    hook: typeof raw.hook === 'string' ? raw.hook : '',
-    durationSeconds:
-      typeof raw.durationSeconds === 'number' && raw.durationSeconds > 0
-        ? raw.durationSeconds
-        : 90,
-    hlsUrl: sanitizeSafeUrl(raw.hlsUrl),
-    videoUrl: sanitizeSafeUrl(raw.videoUrl),
-    posterUrl: sanitizeSafeUrl(raw.posterUrl) ?? fallbackPoster,
-    qualities: Array.isArray(raw.qualities) ? raw.qualities : undefined,
-    storyboardImages: Array.isArray(raw.storyboardImages)
-      ? raw.storyboardImages
-          .map((u) => sanitizeSafeUrl(u))
-          .filter((u): u is string => Boolean(u))
-      : undefined,
-    subtitles: Array.isArray(raw.subtitles) ? raw.subtitles : [],
-  };
+export async function fetchDramaDetail(
+  baseUrl: string,
+  dramaId: string
+): Promise<{ episodes: Episode[]; synopsis?: string; totalEpisodes?: number } | undefined> {
+  const base = normalizeBaseUrl(baseUrl);
+  const url = `${base}/api/videos/${encodeURIComponent(dramaId)}`;
+  try {
+    const data = await fetchJsonWithTimeout<{
+      data?: {
+        description?: string;
+        episode_count?: number;
+        episodes?: Array<{
+          ep_num: number;
+          title: string;
+          duration: number;
+          status?: number;
+        }>;
+      };
+    }>(url);
+
+    if (data?.data?.episodes && data.data.episodes.length > 0) {
+      const episodes: Episode[] = data.data.episodes.map((ep) => ({
+        number: ep.ep_num,
+        title: ep.title || `第 ${ep.ep_num} 集`,
+        hook: '',
+        durationSeconds: Number(ep.duration) || 90,
+        subtitles: [],
+      }));
+      return {
+        episodes,
+        synopsis: data.data.description,
+        totalEpisodes: data.data.episode_count || episodes.length,
+      };
+    }
+  } catch (err) {
+    console.warn(`[dramaApi] Failed to fetch drama detail for ${dramaId}:`, err);
+  }
+  return undefined;
 }
 
-function normalizeDrama(raw: Partial<Drama>, index: number): Drama {
-  const fallback = DEMO_DRAMAS[index % DEMO_DRAMAS.length];
-  const posterUrl = sanitizeSafeUrl(raw.posterUrl) ?? fallback.posterUrl;
-  const rawEpisodes = Array.isArray(raw.episodes) ? raw.episodes : [];
-  const totalEpisodes =
-    typeof raw.totalEpisodes === 'number' && raw.totalEpisodes > 0
-      ? raw.totalEpisodes
-      : Math.max(rawEpisodes.length, 1);
+export async function searchRemoteDramas(baseUrl: string, query: string): Promise<Drama[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const base = normalizeBaseUrl(baseUrl);
+  const url = `${base}/api/search?q=${encodeURIComponent(q)}`;
+  try {
+    const res = await fetchJsonWithTimeout<{
+      data?: {
+        items?: HuangguoVideoItem[];
+      };
+    }>(url);
+    const items = res?.data?.items || [];
+    return items.map((item, idx) => transformHuangguoItemToDrama(item, idx));
+  } catch (err) {
+    console.warn(`[dramaApi] Remote search failed:`, err);
+    return [];
+  }
+}
 
-  const episodes: Episode[] =
-    rawEpisodes.length > 0
-      ? rawEpisodes.map((ep, idx) => normalizeEpisode(ep, idx, posterUrl))
-      : Array.from({ length: totalEpisodes }, (_, idx) =>
-          normalizeEpisode({ number: idx + 1 }, idx, posterUrl)
-        );
-
-  const validCategories = ['AI短剧', '原创短剧', 'AI漫剧'] as const;
-  const category = validCategories.includes(raw.category as (typeof validCategories)[number])
-    ? (raw.category as Drama['category'])
-    : 'AI短剧';
-
-  return {
-    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : `custom-drama-${index + 1}`,
-    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : `未命名短剧 ${index + 1}`,
-    tagline: typeof raw.tagline === 'string' ? raw.tagline : '精选短剧内容',
-    category,
-    genres: Array.isArray(raw.genres) && raw.genres.length > 0 ? raw.genres : ['都市'],
-    posterUrl,
-    heroUrl: sanitizeSafeUrl(raw.heroUrl) ?? posterUrl,
-    status: raw.status === '已完结' ? '已完结' : '连载中',
-    totalEpisodes,
-    updatedEpisodes:
-      typeof raw.updatedEpisodes === 'number' && raw.updatedEpisodes > 0
-        ? raw.updatedEpisodes
-        : episodes.length,
-    heatScore: typeof raw.heatScore === 'number' ? raw.heatScore : 8500 - index * 120,
-    playCountLabel: typeof raw.playCountLabel === 'string' ? raw.playCountLabel : '热播中',
-    likesBase: typeof raw.likesBase === 'number' ? raw.likesBase : 1200,
-    releaseYear: typeof raw.releaseYear === 'string' ? raw.releaseYear : '2026',
-    studio: typeof raw.studio === 'string' ? raw.studio : '自定义片源',
-    synopsis: typeof raw.synopsis === 'string' ? raw.synopsis : '通过自定义 API 接入的短剧剧目。',
-    topicIds: Array.isArray(raw.topicIds) ? raw.topicIds : [],
-    isFeatured: Boolean(raw.isFeatured ?? index === 0),
-    isNew: Boolean(raw.isNew ?? index < 4),
-    episodes,
-  };
+export async function fetchHotSearchKeywords(baseUrl: string): Promise<string[]> {
+  const base = normalizeBaseUrl(baseUrl);
+  const url = `${base}/api/search/hot`;
+  try {
+    const res = await fetchJsonWithTimeout<{
+      data?: {
+        items?: Array<{ word: string }>;
+      };
+    }>(url);
+    const items = res?.data?.items;
+    if (Array.isArray(items) && items.length > 0) {
+      return items.map((i) => i.word).filter(Boolean);
+    }
+  } catch {
+    // fallback
+  }
+  return ['高三爱情故事', '神瞳觉醒', '少妇白洁', '时停手表', '锁情咒', 'AI漫剧', '琼明神女录'];
 }
 
 export interface CatalogResponse {
@@ -151,7 +367,9 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
       ? normalizeBaseUrl(config.baseUrl)
       : config.mode === 'custom' && envBase
         ? normalizeBaseUrl(envBase)
-        : '';
+        : envBase
+          ? normalizeBaseUrl(envBase)
+          : '';
 
   if (!activeBase) {
     return {
@@ -161,62 +379,142 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
     };
   }
 
+  // 1. Try huangguoai API first (/api/videos?page=1&size=30)
+  try {
+    const huangguoUrl = `${activeBase}/api/videos?page=1&size=30`;
+    const res = await fetchJsonWithTimeout<{
+      data?: {
+        items?: HuangguoVideoItem[];
+        pagination?: { total: number };
+      };
+    }>(huangguoUrl);
+
+    const items = res?.data?.items;
+    if (Array.isArray(items) && items.length > 0) {
+      const dramas = items.map((item, idx) => transformHuangguoItemToDrama(item, idx));
+
+      // Fetch topics from /api/topics
+      let topics: Topic[] = [];
+      try {
+        const topicsRes = await fetchJsonWithTimeout<{
+          data?: {
+            items?: HuangguoTopicItem[];
+          };
+        }>(`${activeBase}/api/topics`);
+        const topicItems = topicsRes?.data?.items || [];
+        topics = topicItems.map((t, idx) => ({
+          id: String(t.id || t.slug || `topic-${idx + 1}`),
+          title: t.title,
+          subtitle: (t.intro || '').slice(0, 50) + ((t.intro || '').length > 50 ? '...' : ''),
+          coverUrl: normalizeImageUrl(t.cover) || dramas[idx % dramas.length].posterUrl,
+          dramaIds: dramas.slice(idx * 2, idx * 2 + 3).map((d) => d.id),
+          accentNote: `共 ${t.video_count || 0} 部短剧`,
+        }));
+      } catch {
+        topics = [
+          {
+            id: 'topic-hg-hot',
+            title: '黄果热门短剧精选',
+            subtitle: '高人气、高评分短剧与漫剧合辑',
+            coverUrl: dramas[0].posterUrl,
+            dramaIds: dramas.slice(0, 4).map((d) => d.id),
+            accentNote: `共 ${dramas.length} 部剧集`,
+          },
+        ];
+      }
+
+      return {
+        dramas,
+        topics,
+        source: 'custom',
+      };
+    }
+  } catch {
+    // If /api/videos failed, try standard /dramas endpoint next
+  }
+
+  // 2. Try generic standard /dramas endpoint
   try {
     const dramasPayload = await fetchJsonWithTimeout<unknown>(`${activeBase}/dramas`);
     const rawDramas = unwrapArray<Partial<Drama>>(dramasPayload);
 
-    if (rawDramas.length === 0) {
+    if (rawDramas.length > 0) {
+      const dramas = rawDramas.map((item, idx) => {
+        const fallback = DEMO_DRAMAS[idx % DEMO_DRAMAS.length];
+        const posterUrl = item.posterUrl ? normalizeImageUrl(item.posterUrl) : fallback.posterUrl;
+        return {
+          id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `custom-drama-${idx + 1}`,
+          title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `未命名短剧 ${idx + 1}`,
+          tagline: typeof item.tagline === 'string' ? item.tagline : '精选短剧内容',
+          category: (item.category as DramaCategory) || 'AI短剧',
+          genres: Array.isArray(item.genres) && item.genres.length > 0 ? item.genres : ['都市'],
+          posterUrl,
+          heroUrl: item.heroUrl ? normalizeImageUrl(item.heroUrl) : posterUrl,
+          status: item.status === '已完结' ? '已完结' : '连载中',
+          totalEpisodes: typeof item.totalEpisodes === 'number' && item.totalEpisodes > 0 ? item.totalEpisodes : 1,
+          updatedEpisodes: typeof item.updatedEpisodes === 'number' && item.updatedEpisodes > 0 ? item.updatedEpisodes : 1,
+          heatScore: typeof item.heatScore === 'number' ? item.heatScore : 8500 - idx * 120,
+          playCountLabel: typeof item.playCountLabel === 'string' ? item.playCountLabel : '热播中',
+          likesBase: typeof item.likesBase === 'number' ? item.likesBase : 1200,
+          releaseYear: typeof item.releaseYear === 'string' ? item.releaseYear : '2026',
+          studio: typeof item.studio === 'string' ? item.studio : '自定义片源',
+          synopsis: typeof item.synopsis === 'string' ? item.synopsis : '自定义 API 接入的短剧剧目。',
+          topicIds: Array.isArray(item.topicIds) ? item.topicIds : [],
+          isFeatured: Boolean(item.isFeatured ?? idx === 0),
+          isNew: Boolean(item.isNew ?? idx < 4),
+          episodes: Array.isArray(item.episodes) ? item.episodes : [],
+        } as Drama;
+      });
+
+      let topics: Topic[] = [];
+      try {
+        const topicsPayload = await fetchJsonWithTimeout<unknown>(`${activeBase}/topics`);
+        const rawTopics = unwrapArray<Partial<Topic>>(topicsPayload);
+        topics = rawTopics
+          .filter((t) => typeof t.title === 'string' && t.title.trim())
+          .map((t, idx) => ({
+            id: typeof t.id === 'string' ? t.id : `topic-${idx + 1}`,
+            title: t.title!.trim(),
+            subtitle: typeof t.subtitle === 'string' ? t.subtitle : '',
+            coverUrl: t.coverUrl ? normalizeImageUrl(t.coverUrl) : dramas[idx % dramas.length].posterUrl,
+            dramaIds: Array.isArray(t.dramaIds) ? t.dramaIds : dramas.slice(0, 3).map((d) => d.id),
+            accentNote: typeof t.accentNote === 'string' ? t.accentNote : '精选专题',
+          }));
+      } catch {
+        topics = [
+          {
+            id: 'topic-custom-all',
+            title: '自定义片源推荐合集',
+            subtitle: '来自您配置的远程短剧片源接口',
+            coverUrl: dramas[0].heroUrl ?? dramas[0].posterUrl,
+            dramaIds: dramas.slice(0, 4).map((d) => d.id),
+            accentNote: `共 ${dramas.length} 部剧集`,
+          },
+        ];
+      }
+
       return {
-        dramas: DEMO_DRAMAS,
-        topics: DEMO_TOPICS,
-        source: 'demo',
-        warning: '自定义接口返回剧集列表为空，已自动回退至内置演示库。',
+        dramas,
+        topics,
+        source: 'custom',
       };
     }
-
-    const dramas = rawDramas.map((item, idx) => normalizeDrama(item, idx));
-
-    let topics: Topic[] = [];
-    try {
-      const topicsPayload = await fetchJsonWithTimeout<unknown>(`${activeBase}/topics`);
-      const rawTopics = unwrapArray<Partial<Topic>>(topicsPayload);
-      topics = rawTopics
-        .filter((t) => typeof t.title === 'string' && t.title.trim())
-        .map((t, idx) => ({
-          id: typeof t.id === 'string' ? t.id : `topic-${idx + 1}`,
-          title: t.title!.trim(),
-          subtitle: typeof t.subtitle === 'string' ? t.subtitle : '',
-          coverUrl: sanitizeSafeUrl(t.coverUrl) ?? dramas[idx % dramas.length].posterUrl,
-          dramaIds: Array.isArray(t.dramaIds) ? t.dramaIds : dramas.slice(0, 3).map((d) => d.id),
-          accentNote: typeof t.accentNote === 'string' ? t.accentNote : '精选专题',
-        }));
-    } catch {
-      topics = [
-        {
-          id: 'topic-custom-all',
-          title: '自定义片源推荐合集',
-          subtitle: '来自您配置的远程短剧片源接口',
-          coverUrl: dramas[0].heroUrl ?? dramas[0].posterUrl,
-          dramaIds: dramas.slice(0, 4).map((d) => d.id),
-          accentNote: `共 ${dramas.length} 部剧集`,
-        },
-      ];
-    }
-
-    return {
-      dramas,
-      topics,
-      source: 'custom',
-    };
   } catch (err) {
-    const reason = err instanceof Error ? err.message : '无法连接至自定义片源接口';
+    const reason = err instanceof Error ? err.message : '无法连接至短剧片源接口';
     return {
       dramas: DEMO_DRAMAS,
       topics: DEMO_TOPICS,
       source: 'demo',
-      warning: `自定义接口连接失败（${reason}），已平滑回退至内置演示库。`,
+      warning: `片源接口连接受阻（${reason}）。已平滑回退至内置演示库。请确保本地代理开启（如 127.0.0.1:7897）。`,
     };
   }
+
+  return {
+    dramas: DEMO_DRAMAS,
+    topics: DEMO_TOPICS,
+    source: 'demo',
+    warning: '片源接口未返回剧集列表，已自动回退至内置演示库。',
+  };
 }
 
 export async function testCustomApiEndpoint(baseUrl: string): Promise<{
@@ -228,36 +526,62 @@ export async function testCustomApiEndpoint(baseUrl: string): Promise<{
   if (!isValidHttpUrl(baseUrl)) {
     return {
       ok: false,
-      message: '请输入以 http:// 或 https:// 开头的有效 API 地址。',
+      message: '请输入以 http:// 或 https:// 开头的有效 API 地址，或本地代理路径如 /api-hg。',
     };
   }
 
   const normalized = normalizeBaseUrl(baseUrl);
   const start = performance.now();
 
+  // Test huangguoai format first
+  try {
+    const hgPayload = await fetchJsonWithTimeout<{
+      data?: {
+        items?: HuangguoVideoItem[];
+        pagination?: { total: number };
+      };
+    }>(`${normalized}/api/videos?page=1&size=5`);
+
+    const latencyMs = Math.round(performance.now() - start);
+    const items = hgPayload?.data?.items || [];
+    const total = hgPayload?.data?.pagination?.total || items.length;
+
+    if (items.length > 0) {
+      return {
+        ok: true,
+        message: `成功连通黄果短剧 API（共收录 ${total} 部短剧，响应耗时 ${latencyMs}ms）。`,
+        count: total,
+        latencyMs,
+      };
+    }
+  } catch {
+    // try generic
+  }
+
+  // Test generic /dramas
   try {
     const payload = await fetchJsonWithTimeout<unknown>(`${normalized}/dramas`);
     const list = unwrapArray<unknown>(payload);
     const latencyMs = Math.round(performance.now() - start);
 
-    if (list.length === 0) {
+    if (list.length > 0) {
       return {
-        ok: false,
-        message: `接口可访问（${latencyMs}ms），但 /dramas 未返回有效剧集数组。`,
+        ok: true,
+        message: `连接成功，读取到 ${list.length} 部剧集（响应耗时 ${latencyMs}ms）。`,
+        count: list.length,
         latencyMs,
       };
     }
 
     return {
-      ok: true,
-      message: `连接成功，读取到 ${list.length} 部剧集（响应 ${latencyMs}ms）。`,
-      count: list.length,
+      ok: false,
+      message: `接口可访问（${latencyMs}ms），但未识别到短剧列表数据。`,
       latencyMs,
     };
   } catch (err) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : '接口测试失败，请检查地址与 CORS 配置。',
+      message: err instanceof Error ? err.message : '接口测试失败，请检查网络代理与 CORS 设置。',
     };
   }
 }

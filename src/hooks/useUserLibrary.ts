@@ -46,8 +46,14 @@ function readPersistedState(): UserLibraryState {
         ? parsed.searchHistory
         : DEFAULT_STATE.searchHistory,
       apiConfig: {
-        mode: parsed.apiConfig?.mode === 'custom' ? 'custom' : 'demo',
-        baseUrl: typeof parsed.apiConfig?.baseUrl === 'string' ? parsed.apiConfig.baseUrl : envApiBase,
+        mode:
+          parsed.apiConfig?.mode === 'demo' && !parsed.apiConfig?.baseUrl
+            ? (envApiBase ? 'custom' : 'demo')
+            : (parsed.apiConfig?.mode ?? (envApiBase ? 'custom' : 'demo')),
+        baseUrl:
+          typeof parsed.apiConfig?.baseUrl === 'string' && parsed.apiConfig.baseUrl.trim()
+            ? parsed.apiConfig.baseUrl
+            : envApiBase,
         preferredQuality: parsed.apiConfig?.preferredQuality ?? 'auto',
       },
     };

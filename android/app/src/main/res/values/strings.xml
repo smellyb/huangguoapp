@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">黄果短剧</string>
+    <string name="title_activity_main">黄果短剧</string>
+    <string name="package_name">com.huangguo.app</string>
+    <string name="custom_url_scheme">com.huangguo.app</string>
+</resources>

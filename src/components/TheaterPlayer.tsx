@@ -33,6 +33,7 @@ import {
   X,
 } from 'lucide-react';
 import { episodeLikeKey } from '../hooks/useUserLibrary';
+import { fetchEpisodeStreamUrl } from '../services/dramaApi';
 import {
   cancelPendingPreloads,
   isEpisodeWarmed,
@@ -271,6 +272,7 @@ interface TheaterPlayerProps {
   followedIds: string[];
   likedEpisodeKeys: string[];
   preferredQuality: QualityPreference;
+  apiBaseUrl?: string;
   onChangeQuality: (quality: QualityPreference) => void;
   onSelectDramaEpisode: (
     dramaId: string,
@@ -287,6 +289,7 @@ interface TheaterPlayerProps {
     immediate?: boolean
   ) => void;
   onNotify: (message: string) => void;
+  onOpenLineSelector?: () => void;
 }
 
 export function TheaterPlayer({
@@ -297,12 +300,14 @@ export function TheaterPlayer({
   followedIds,
   likedEpisodeKeys,
   preferredQuality,
+  apiBaseUrl,
   onChangeQuality,
   onSelectDramaEpisode,
   onToggleFollow,
   onToggleLike,
   onRecordProgress,
   onNotify,
+  onOpenLineSelector,
 }: TheaterPlayerProps) {
   const episode: Episode = useMemo(
     () =>
@@ -316,7 +321,9 @@ export function TheaterPlayer({
     [drama, episode.number]
   );
 
-  const hasExternalStream = Boolean(episode.hlsUrl || episode.videoUrl);
+  const [resolvedHlsUrl, setResolvedHlsUrl] = useState<string | undefined>(episode.hlsUrl);
+  const activeHlsUrl = episode.hlsUrl || resolvedHlsUrl;
+  const hasExternalStream = Boolean(activeHlsUrl || episode.videoUrl);
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
@@ -333,6 +340,46 @@ export function TheaterPlayer({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [preloadTriggered, setPreloadTriggered] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
+
+  // Automatically resolve remote HLS stream URL if not yet loaded
+  useEffect(() => {
+    let active = true;
+
+    if (episode.hlsUrl) {
+      setResolvedHlsUrl(episode.hlsUrl);
+      setStreamError(null);
+      return;
+    }
+
+    if (apiBaseUrl) {
+      setIsBuffering(true);
+      setStreamError(null);
+
+      fetchEpisodeStreamUrl(apiBaseUrl, drama.id, episode.number)
+        .then((stream) => {
+          if (!active) return;
+          if (stream) {
+            episode.hlsUrl = stream;
+            setResolvedHlsUrl(stream);
+          } else {
+            setResolvedHlsUrl(undefined);
+          }
+        })
+        .catch(() => {
+          if (!active) return;
+          setResolvedHlsUrl(undefined);
+        })
+        .finally(() => {
+          if (active) setIsBuffering(false);
+        });
+
+      return () => {
+        active = false;
+      };
+    } else {
+      setResolvedHlsUrl(undefined);
+    }
+  }, [apiBaseUrl, drama.id, episode, retryToken]);
 
   // Fullscreen & Landscape Cinema Modes
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -578,10 +625,19 @@ export function TheaterPlayer({
     const ratio = duration > 0 ? currentTime / duration : 0;
     const remaining = duration - currentTime;
     if (ratio >= 0.6 || (duration > 20 && remaining <= 15)) {
-      preloadNextEpisode(drama.id, nextEpisode);
+      if (nextEpisode && !nextEpisode.hlsUrl && apiBaseUrl) {
+        fetchEpisodeStreamUrl(apiBaseUrl, drama.id, nextEpisode.number).then((stream) => {
+          if (stream) {
+            nextEpisode.hlsUrl = stream;
+            preloadNextEpisode(drama.id, nextEpisode);
+          }
+        });
+      } else {
+        preloadNextEpisode(drama.id, nextEpisode);
+      }
       setPreloadTriggered(true);
     }
-  }, [currentTime, duration, drama.id, nextEpisode, preloadTriggered]);
+  }, [apiBaseUrl, currentTime, duration, drama.id, nextEpisode, preloadTriggered]);
 
   // Cancel in-flight preload requests when leaving theater
   useEffect(() => {
@@ -624,7 +680,7 @@ export function TheaterPlayer({
     const video = videoRef.current;
     if (!video) return;
 
-    const hlsUrl = episode.hlsUrl;
+    const hlsUrl = activeHlsUrl;
     const mp4Url = episode.videoUrl;
 
     const applyInitialSeek = () => {
@@ -716,7 +772,7 @@ export function TheaterPlayer({
       video.removeAttribute('src');
       video.load();
     };
-  }, [episode.hlsUrl, episode.videoUrl, hasExternalStream, retryToken]);
+  }, [activeHlsUrl, episode.videoUrl, hasExternalStream, retryToken]);
 
   // Apply HLS manual quality preference cleanly when changed
   useEffect(() => {
@@ -1123,17 +1179,28 @@ export function TheaterPlayer({
                 <p className="text-sm text-slate-200 leading-relaxed">
                   {streamError}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStreamError(null);
-                    setRetryToken((n) => n + 1);
-                  }}
-                  className="min-h-[44px] w-full rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors"
-                >
-                  <RefreshCw className="w-4 h-4" aria-hidden="true" />
-                  <span>重新加载片源</span>
-                </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStreamError(null);
+                      setRetryToken((n) => n + 1);
+                    }}
+                    className="min-h-[44px] w-full rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                    <span>重新加载片源</span>
+                  </button>
+                  {onOpenLineSelector && (
+                    <button
+                      type="button"
+                      onClick={onOpenLineSelector}
+                      className="min-h-[40px] w-full rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-amber-300 text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <span>切换其他直连线路</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1174,6 +1241,18 @@ export function TheaterPlayer({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              {onOpenLineSelector && (
+                <button
+                  type="button"
+                  onClick={onOpenLineSelector}
+                  aria-label="切换播放线路"
+                  className="min-h-[38px] px-2.5 rounded-full bg-black/40 hover:bg-black/65 backdrop-blur-md text-amber-300 text-xs font-semibold inline-flex items-center gap-1 transition-colors"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>线路</span>
+                </button>
+              )}
+
               {(isFullscreen || effectiveLandscape) && (
                 <button
                   type="button"

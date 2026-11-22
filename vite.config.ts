@@ -9,6 +9,14 @@ export default defineConfig({
     port: 3000,
     allowedHosts: true,
     hmr: false,
+    proxy: {
+      '/api-hg': {
+        target: 'https://huangguoai.com',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api-hg/, ''),
+      },
+    },
   },
   preview: {
     host: '0.0.0.0',

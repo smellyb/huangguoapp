@@ -5,17 +5,30 @@ import {
   Clock,
   Copy,
   Database,
+  ExternalLink,
+  Globe,
   Play,
   PlugZap,
+  Radio,
   Server,
+  ShieldCheck,
   Trash2,
+  Wifi,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import {
   isValidHttpUrl,
   normalizeBaseUrl,
   testCustomApiEndpoint,
 } from '../services/dramaApi';
+import {
+  DEFAULT_PERMANENT_DOMAINS,
+  DEFAULT_SPEED_LINES,
+  OFFICIAL_CHANNELS,
+  OFFICIAL_SUPPORT_EMAIL,
+  PUBLISH_PAGE_URL,
+} from '../services/publishLines';
 import type { ApiConfig, Drama, WatchHistoryEntry } from '../types/drama';
 import { DramaPoster } from './DramaPoster';
 
@@ -31,6 +44,7 @@ interface ProfileViewProps {
   onClearHistory: () => void;
   onUpdateApiConfig: (patch: Partial<ApiConfig>) => void;
   onNotify: (message: string) => void;
+  onOpenLineSelector?: () => void;
 }
 
 const API_SCHEMA_SNIPPET = `GET {baseUrl}/dramas
@@ -76,6 +90,7 @@ export function ProfileView({
   onClearHistory,
   onUpdateApiConfig,
   onNotify,
+  onOpenLineSelector,
 }: ProfileViewProps) {
   const [section, setSection] = useState<'library' | 'api'>('library');
   const [apiInput, setApiInput] = useState(apiConfig.baseUrl);
@@ -194,7 +209,7 @@ export function ProfileView({
                 : 'text-slate-300 hover:text-white'
             }`}
           >
-            片源 API 配置
+            片源与线路设置
           </button>
         </div>
       </div>
@@ -337,9 +352,81 @@ export function ProfileView({
           </section>
         </div>
       ) : (
-        /* Custom Piece-Source API Configuration Center */
+        /* Custom Piece-Source API Configuration Center & Line Switcher */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           <div className="lg:col-span-7 space-y-6">
+            
+            {/* Quick Line Selector Card */}
+            <div className="rounded-3xl bg-gradient-to-br from-[#161822] to-[#12131A] border border-amber-500/30 p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                    <Zap className="w-5 h-5 fill-current" />
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                      <span>官方线路与发布页导航</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        免翻极速
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      同步自官方发布页：
+                      <a
+                        href={PUBLISH_PAGE_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-amber-400 hover:underline font-mono"
+                      >
+                        huangguotv.github.io
+                      </a>
+                    </p>
+                  </div>
+                </div>
+
+                {onOpenLineSelector && (
+                  <button
+                    type="button"
+                    onClick={onOpenLineSelector}
+                    className="min-h-[40px] px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-xs font-bold inline-flex items-center gap-1.5 transition-colors self-start sm:self-auto shrink-0 shadow-lg shadow-amber-500/20"
+                  >
+                    <Wifi className="w-3.5 h-3.5" />
+                    <span>测速与换线面板</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-2 pt-1 border-t border-white/[0.08]">
+                <div className="text-xs text-slate-300 font-medium">推荐国内直连线路（点击快捷填入）：</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {DEFAULT_SPEED_LINES.slice(0, 4).map((line) => (
+                    <button
+                      key={line.id}
+                      type="button"
+                      onClick={() => {
+                        setApiInput(line.url);
+                        onUpdateApiConfig({ mode: 'custom', baseUrl: line.url });
+                        onNotify(`已切换至：${line.name}`);
+                      }}
+                      className="p-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-colors flex items-center justify-between gap-2 group"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-200 group-hover:text-amber-400 truncate">
+                          {line.name}
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-500 truncate">
+                          {line.url}
+                        </div>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 shrink-0 font-mono">
+                        {line.tag}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <form
               onSubmit={handleTestAndSave}
               className="rounded-3xl bg-[#14161D] border border-white/[0.08] p-6 space-y-5"
@@ -347,13 +434,12 @@ export function ProfileView({
               <div className="space-y-1">
                 <h2 className="text-lg font-bold text-white inline-flex items-center gap-2">
                   <Server className="w-5 h-5 text-amber-400" aria-hidden="true" />
-                  <span>接入自有短剧片源 API</span>
+                  <span>片源服务器地址设置</span>
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
-                  填写您的片源服务基地址（如{' '}
-                  <code className="font-mono text-slate-200">https://api.yourdomain.com</code>
-                  ），前端将通过 <code className="font-mono text-slate-200">GET /dramas</code>{' '}
-                  拉取剧库并自动启用 HLS 自适应码率播放与下一集预加载。
+                  填写短剧 API 基地址（如{' '}
+                  <code className="font-mono text-slate-200">https://zv8c.zekpkeusp.cc</code>
+                  ），支持远程官方轮换镜像或本地开发代理。
                 </p>
               </div>
 
@@ -362,16 +448,40 @@ export function ProfileView({
                   htmlFor="custom-api-url"
                   className="block text-xs font-medium text-slate-300"
                 >
-                  片源 API 基地址（支持 HTTPS / HTTP）
+                  当前配置地址（支持 HTTPS / HTTP 或本地代理）
                 </label>
                 <input
                   id="custom-api-url"
-                  type="url"
+                  type="text"
                   value={apiInput}
                   onChange={(e) => setApiInput(e.target.value)}
-                  placeholder="https://api.example.com/v1"
+                  placeholder="https://huangguoai.com"
                   className="w-full min-h-[48px] px-4 rounded-xl bg-[#0B0C10] border border-white/15 text-sm font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
                 />
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs text-slate-400">官方入口：</span>
+                  <button
+                    type="button"
+                    onClick={() => setApiInput('https://huangguoai.com')}
+                    className="min-h-[32px] px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-medium transition-colors"
+                  >
+                    官网主站 (huangguoai.com)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setApiInput('https://huangguoai.ai')}
+                    className="min-h-[32px] px-3 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-slate-300 text-xs font-medium transition-colors"
+                  >
+                    中转入口 (huangguoai.ai)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setApiInput('/api-hg')}
+                    className="min-h-[32px] px-3 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-slate-300 text-xs font-medium transition-colors"
+                  >
+                    本地代理 (/api-hg)
+                  </button>
+                </div>
               </div>
 
               {testResult && (
@@ -463,6 +573,51 @@ export function ProfileView({
               <code className="font-mono text-slate-200">VITE_DRAMA_API_BASE_URL</code>
               ，应用启动时将自动拉取您的远程片源。
             </p>
+          </div>
+
+          {/* Official Safety Notice & Publishing Network (huangguotv.github.io) */}
+          <div className="lg:col-span-12 rounded-3xl bg-gradient-to-r from-[#171924] to-[#13151D] border border-amber-500/20 p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-5 h-5 text-amber-400" />
+                <h3 className="text-base font-bold text-white">官方地址发布页与防迷路网络</h3>
+              </div>
+              <a
+                href={PUBLISH_PAGE_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-amber-400 hover:underline inline-flex items-center gap-1 font-mono"
+              >
+                <span>huangguotv.github.io</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              黄果短剧官方唯一认证地址发布页部署于 GitHub Pages 与 Cloudflare 多云网络。认准唯一正版域名 <code className="font-mono text-amber-300">huangguoai.com</code>。若遇到线路阻断，请发送任意邮件至 <a href={`mailto:${OFFICIAL_SUPPORT_EMAIL}`} className="text-amber-300 underline font-mono">{OFFICIAL_SUPPORT_EMAIL}</a> 自动索取实时可用地址。
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              {OFFICIAL_CHANNELS.map((ch) => (
+                <a
+                  key={ch.type}
+                  href={ch.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-3 rounded-2xl bg-[#0B0C10] border border-white/[0.08] hover:border-amber-500/30 transition-colors flex items-center gap-2.5 group"
+                >
+                  <Globe className="w-4 h-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-200 group-hover:text-amber-300 truncate">
+                      {ch.title}
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate">
+                      {ch.handle}
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
           </div>
         </div>
       )}

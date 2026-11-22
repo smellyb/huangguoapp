@@ -1,0 +1,10 @@
+{
+  "name": "黄果短剧",
+  "short_name": "黄果短剧",
+  "description": "黄果短剧 AI短剧与原创竖屏短剧播放器",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B0C10",
+  "theme_color": "#0B0C10",
+  "orientation": "portrait"
+}

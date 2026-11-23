@@ -6,7 +6,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
   type TouchEvent,
 } from 'react';
 import {
@@ -73,7 +75,7 @@ const QUALITY_OPTIONS: { value: QualityPreference; label: string }[] = [
   { value: '480p', label: '480P' },
 ];
 
-type FitMode = 'cover' | 'contain';
+type FitMode = 'auto' | 'contain' | 'cover';
 
 function formatTime(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds));
@@ -99,6 +101,7 @@ interface ProgressOverlayProps {
   onSeek: (seconds: number) => void;
   showControls: boolean;
   compactPortrait?: boolean;
+  isRotated90?: boolean;
 }
 
 const PlayerProgressOverlay = memo(function PlayerProgressOverlay({
@@ -111,8 +114,13 @@ const PlayerProgressOverlay = memo(function PlayerProgressOverlay({
   onSeek,
   showControls,
   compactPortrait = false,
+  isRotated90 = false,
 }: ProgressOverlayProps) {
   const [scrubbingTime, setScrubbingTime] = useState<number | null>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+  const activePointerIdRef = useRef<number | null>(null);
+  const latestScrubTimeRef = useRef<number | null>(null);
 
   const activeSubtitle = useMemo(() => {
     if (!subtitlesEnabled || subtitles.length === 0) return '';
@@ -121,6 +129,87 @@ const PlayerProgressOverlay = memo(function PlayerProgressOverlay({
     );
     return cue?.text ?? '';
   }, [subtitlesEnabled, subtitles, currentTime]);
+
+  const resolveTimeFromPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const track = trackRef.current;
+      if (!track || duration <= 0) return currentTime;
+      const rect = track.getBoundingClientRect();
+      // When inside a clockwise 90deg CSS-rotated stage, visual left->right maps to physical top->bottom
+      const ratio = isRotated90
+        ? rect.height > 0
+          ? (clientY - rect.top) / rect.height
+          : 0
+        : rect.width > 0
+          ? (clientX - rect.left) / rect.width
+          : 0;
+      const clamped = Math.max(0, Math.min(1, ratio));
+      return clamped * duration;
+    },
+    [currentTime, duration, isRotated90]
+  );
+
+  const handleTrackPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      isDraggingRef.current = true;
+      activePointerIdRef.current = e.pointerId;
+      const next = resolveTimeFromPoint(e.clientX, e.clientY);
+      latestScrubTimeRef.current = next;
+      setScrubbingTime(next);
+    },
+    [resolveTimeFromPoint]
+  );
+
+  const handleTrackPointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isDraggingRef.current || activePointerIdRef.current !== e.pointerId) return;
+      e.stopPropagation();
+      const next = resolveTimeFromPoint(e.clientX, e.clientY);
+      latestScrubTimeRef.current = next;
+      setScrubbingTime(next);
+    },
+    [resolveTimeFromPoint]
+  );
+
+  const handleTrackPointerEnd = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isDraggingRef.current || activePointerIdRef.current !== e.pointerId) return;
+      e.stopPropagation();
+      isDraggingRef.current = false;
+      activePointerIdRef.current = null;
+      if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      const finalTime =
+        latestScrubTimeRef.current ?? resolveTimeFromPoint(e.clientX, e.clientY);
+      latestScrubTimeRef.current = null;
+      setScrubbingTime(null);
+      onSeek(finalTime);
+    },
+    [onSeek, resolveTimeFromPoint]
+  );
+
+  const handleTrackKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (duration <= 0) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        onSeek(Math.min(duration, currentTime + 5));
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        onSeek(Math.max(0, currentTime - 5));
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        onSeek(0);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        onSeek(duration);
+      }
+    },
+    [currentTime, duration, onSeek]
+  );
 
   const displayTime = scrubbingTime ?? currentTime;
   const progressPercent =
@@ -158,10 +247,28 @@ const PlayerProgressOverlay = memo(function PlayerProgressOverlay({
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        {/* 40px expanded touch hitbox wrapping a sleek bar */}
-        <div className="relative h-9 flex items-center">
+        {/* 40px expanded touch hitbox with rotated-axis coordinate awareness */}
+        <div
+          ref={trackRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="播放进度"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(Math.max(duration, 1))}
+          aria-valuenow={Math.round(displayTime)}
+          aria-valuetext={`${formatTime(displayTime)} / ${formatTime(duration)}`}
+          onPointerDown={handleTrackPointerDown}
+          onPointerMove={handleTrackPointerMove}
+          onPointerUp={handleTrackPointerEnd}
+          onPointerCancel={handleTrackPointerEnd}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
+          onKeyDown={handleTrackKeyDown}
+          className="relative h-10 flex items-center cursor-pointer touch-none select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 rounded-lg"
+        >
           <div
-            className={`w-full rounded-full bg-white/25 overflow-hidden transition-all duration-150 ${
+            className={`w-full rounded-full bg-white/25 overflow-hidden transition-all duration-150 pointer-events-none ${
               isExpanded ? 'h-1.5' : 'h-[3px]'
             }`}
           >
@@ -182,36 +289,6 @@ const PlayerProgressOverlay = memo(function PlayerProgressOverlay({
               style={{ left: `${progressPercent}%` }}
             />
           )}
-          <input
-            type="range"
-            min={0}
-            max={Math.max(duration, 1)}
-            step={0.5}
-            value={Math.min(displayTime, Math.max(duration, 1))}
-            onPointerDown={() => setScrubbingTime(currentTime)}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              setScrubbingTime(currentTime);
-            }}
-            onTouchMove={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              const val = Number(e.target.value);
-              setScrubbingTime(val);
-            }}
-            onPointerUp={(e) => {
-              const val = Number((e.target as HTMLInputElement).value);
-              setScrubbingTime(null);
-              onSeek(val);
-            }}
-            onTouchEnd={(e) => {
-              e.stopPropagation();
-              const val = Number((e.target as HTMLInputElement).value);
-              setScrubbingTime(null);
-              onSeek(val);
-            }}
-            aria-label="播放进度"
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-          />
         </div>
 
         {isExpanded && (
@@ -497,11 +574,15 @@ export function TheaterPlayer({
 
   // Fullscreen & Landscape Cinema Modes
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [isPortraitMobile, setIsPortraitMobile] = useState(false);
   const [isDeviceLandscape, setIsDeviceLandscape] = useState(false);
-  const [fitMode, setFitMode] = useState<FitMode>('cover');
+  const [fitMode, setFitMode] = useState<FitMode>('auto');
+  const [mediaAspectRatio, setMediaAspectRatio] = useState<number | null>(null);
+  const [stageSize, setStageSize] = useState<{ w: number; h: number }>({
+    w: 0,
+    h: 0,
+  });
   const [hudVisible, setHudVisible] = useState(true);
 
   // Gestures & Floating Overlays
@@ -528,11 +609,13 @@ export function TheaterPlayer({
   const stallAttemptsRef = useRef(0);
   const currentTimeRef = useRef(initialTimeSeconds);
   const hudTimerRef = useRef<number | null>(null);
+  const landscapeUsedFullscreenRef = useRef(false);
 
   // Gesture state refs
   const touchStartRef = useRef<{
     x: number;
     y: number;
+    startLocalX: number;
     time: number;
     stageW: number;
     stageH: number;
@@ -577,18 +660,48 @@ export function TheaterPlayer({
   useEffect(() => {
     const onFsChange = () => {
       const active = Boolean(document.fullscreenElement);
-      setIsNativeFullscreen(active);
       if (!active) {
         setIsFullscreen(false);
+        if (landscapeUsedFullscreenRef.current) {
+          landscapeUsedFullscreenRef.current = false;
+          setIsLandscape(false);
+          try {
+            (
+              screen.orientation as ScreenOrientation & { unlock?: () => void }
+            )?.unlock?.();
+          } catch {
+            // Ignore
+          }
+        }
       }
     };
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => {
+      setStageSize({
+        w: el.clientWidth || window.innerWidth,
+        h: el.clientHeight || window.innerHeight,
+      });
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [isFullscreen, isLandscape, isPortraitMobile, isDeviceLandscape]);
+
   const effectiveLandscape = isLandscape || isDeviceLandscape;
-  const isRotatedMobileLandscape =
-    isLandscape && isPortraitMobile && !isNativeFullscreen;
+  // When user requests landscape on a portrait mobile screen, CSS 90deg fallback engages
+  // automatically if native orientation lock did not rotate the viewport to landscape.
+  const isRotatedMobileLandscape = isLandscape && isPortraitMobile;
   const isImmersiveOverlay =
     isFullscreen || isRotatedMobileLandscape || isDeviceLandscape;
 
@@ -667,6 +780,7 @@ export function TheaterPlayer({
     setShowMoreSheet(false);
 
     if (isFullscreen) {
+      landscapeUsedFullscreenRef.current = false;
       if (document.fullscreenElement) {
         await document.exitFullscreen().catch(() => undefined);
       }
@@ -678,27 +792,25 @@ export function TheaterPlayer({
         // Ignore
       }
       setIsFullscreen(false);
-      setIsNativeFullscreen(false);
       onNotify('已退出全屏');
       return;
     }
 
     setIsFullscreen(true);
+    onPushHistoryLayer?.('fullscreen');
     if (stageRef.current?.requestFullscreen) {
       try {
         await stageRef.current.requestFullscreen();
-        setIsNativeFullscreen(true);
       } catch {
-        setIsNativeFullscreen(false);
+        // Keep CSS full-viewport fullscreen active
       }
     }
     onNotify('已进入全屏模式');
-  }, [isFullscreen, onNotify]);
+  }, [isFullscreen, onNotify, onPushHistoryLayer]);
 
   const toggleLandscape = useCallback(async () => {
     setShowMoreSheet(false);
     const next = !isLandscape;
-    setIsLandscape(next);
     setHudVisible(true);
 
     const orientationApi = screen.orientation as ScreenOrientation & {
@@ -707,24 +819,67 @@ export function TheaterPlayer({
     };
 
     if (next) {
-      try {
-        await orientationApi?.lock?.('landscape');
-      } catch {
-        // Falls back to rotated mobile stage / widescreen stage
+      setIsLandscape(true);
+      onPushHistoryLayer?.('landscape');
+
+      // On portrait mobile, attempt true OS fullscreen + landscape lock first;
+      // if orientation lock is unsupported/blocked, exit portrait fullscreen cleanly so CSS 90deg fallback takes over.
+      if (isPortraitMobile) {
+        let enteredNativeFs = false;
+        if (stageRef.current?.requestFullscreen && !document.fullscreenElement) {
+          try {
+            await stageRef.current.requestFullscreen();
+            enteredNativeFs = Boolean(document.fullscreenElement);
+          } catch {
+            enteredNativeFs = false;
+          }
+        }
+
+        let lockedNativeLandscape = false;
+        if (orientationApi?.lock) {
+          try {
+            await orientationApi.lock('landscape');
+            lockedNativeLandscape = true;
+          } catch {
+            lockedNativeLandscape = false;
+          }
+        }
+
+        if (lockedNativeLandscape) {
+          landscapeUsedFullscreenRef.current = enteredNativeFs;
+          if (enteredNativeFs) setIsFullscreen(true);
+        } else if (enteredNativeFs && document.fullscreenElement) {
+          landscapeUsedFullscreenRef.current = false;
+          await document.exitFullscreen().catch(() => undefined);
+          setIsFullscreen(false);
+        }
+      } else if (orientationApi?.lock) {
+        try {
+          await orientationApi.lock('landscape');
+        } catch {
+          // Desktop / wide viewport renders widescreen cinema stage
+        }
       }
-      onNotify('已切换横屏影院');
+
+      onNotify('已切换横屏全屏');
     } else {
+      landscapeUsedFullscreenRef.current = false;
+      setIsLandscape(false);
+      setIsFullscreen(false);
       try {
         orientationApi?.unlock?.();
       } catch {
         // Ignore
       }
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => undefined);
+      }
       onNotify('已恢复竖屏刷剧');
     }
-  }, [isLandscape, onNotify]);
+  }, [isLandscape, isPortraitMobile, onNotify, onPushHistoryLayer]);
 
   // Register unified mobile back-button dismissal priority:
-  // More Sheet -> Episode Sheet -> Fullscreen -> Landscape -> let App exit Theater
+  // More Sheet -> Episode Sheet -> Landscape (also exits paired fullscreen) -> Fullscreen -> let App exit Theater
   useEffect(() => {
     if (!overlayBackHandlerRef) return;
     overlayBackHandlerRef.current = () => {
@@ -736,12 +891,12 @@ export function TheaterPlayer({
         setShowEpisodeSheet(false);
         return true;
       }
-      if (isFullscreen) {
-        void toggleFullscreen();
-        return true;
-      }
       if (isLandscape) {
         void toggleLandscape();
+        return true;
+      }
+      if (isFullscreen) {
+        void toggleFullscreen();
         return true;
       }
       return false;
@@ -781,6 +936,10 @@ export function TheaterPlayer({
   }, [currentTime]);
 
   useEffect(() => {
+    setFitMode('auto');
+  }, [drama.id]);
+
+  useEffect(() => {
     const startSec =
       initialTimeSeconds > 0 && initialTimeSeconds < episode.durationSeconds - 3
         ? initialTimeSeconds
@@ -788,6 +947,7 @@ export function TheaterPlayer({
     setCurrentTime(startSec);
     currentTimeRef.current = startSec;
     setDuration(episode.durationSeconds);
+    setMediaAspectRatio(null);
     setStreamError(null);
     setIsBuffering(false);
     setPreloadTriggered(isEpisodeWarmed(drama.id, episode.number + 1));
@@ -1170,10 +1330,18 @@ export function TheaterPlayer({
     const touch = event.touches[0];
     const stage = stageRef.current;
     const rect = stage?.getBoundingClientRect();
-    const stageW = rect?.width || window.innerWidth;
-    const stageH = rect?.height || window.innerHeight;
-    const touchX = touch.clientX - (rect?.left || 0);
-    const touchY = touch.clientY - (rect?.top || 0);
+    const stageW = isRotatedMobileLandscape
+      ? rect?.height || window.innerHeight
+      : rect?.width || window.innerWidth;
+    const stageH = isRotatedMobileLandscape
+      ? rect?.width || window.innerWidth
+      : rect?.height || window.innerHeight;
+    const touchX = isRotatedMobileLandscape
+      ? touch.clientY - (rect?.top || 0)
+      : touch.clientX - (rect?.left || 0);
+    const touchY = isRotatedMobileLandscape
+      ? (rect?.right || window.innerWidth) - touch.clientX
+      : touch.clientY - (rect?.top || 0);
 
     lastTouchHandledAtRef.current = Date.now();
     pokeHud();
@@ -1227,6 +1395,7 @@ export function TheaterPlayer({
     touchStartRef.current = {
       x: touch.clientX,
       y: touch.clientY,
+      startLocalX: touchX,
       time: now,
       stageW,
       stageH,
@@ -1283,11 +1452,9 @@ export function TheaterPlayer({
         gestureTypeRef.current = 'seek';
       } else if (absDy > 14 && absDy > absDx * 1.15) {
         if (effectiveLandscape || isFullscreen) {
-          const rect = stageRef.current?.getBoundingClientRect();
-          const relStartX = start.x - (rect?.left || 0);
-          if (relStartX < start.stageW * 0.3) {
+          if (start.startLocalX < start.stageW * 0.3) {
             gestureTypeRef.current = 'brightness';
-          } else if (relStartX > start.stageW * 0.7) {
+          } else if (start.startLocalX > start.stageW * 0.7) {
             gestureTypeRef.current = 'volume';
           } else {
             gestureTypeRef.current = 'swipe';
@@ -1543,13 +1710,26 @@ export function TheaterPlayer({
     return '';
   }, [rawActiveFrameUrl, failedFrames]);
 
-  const mediaFitClass = fitMode === 'contain' ? 'object-contain' : 'object-cover';
+  const syncVideoAspectRatio = useCallback((video: HTMLVideoElement) => {
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      setMediaAspectRatio(video.videoWidth / video.videoHeight);
+    }
+  }, []);
+
+  const isLandscapeMedia = mediaAspectRatio !== null && mediaAspectRatio > 1.05;
+  const effectiveFit: 'contain' | 'cover' =
+    fitMode === 'auto'
+      ? isLandscapeMedia || effectiveLandscape
+        ? 'contain'
+        : 'cover'
+      : fitMode;
+  const mediaFitClass = effectiveFit === 'contain' ? 'object-contain' : 'object-cover';
 
   // Full 100dvh on portrait mobile (no bottom nav fighting for space!); spacious cinema stage on desktop
-  const stageContainerClass = isFullscreen
-    ? 'fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 bg-black'
-    : isRotatedMobileLandscape
-      ? 'fixed top-1/2 left-1/2 z-50 w-[100dvh] h-[100vw] -translate-x-1/2 -translate-y-1/2 rotate-90 origin-center rounded-none border-0 bg-black'
+  const stageContainerClass = isRotatedMobileLandscape
+    ? 'fixed top-1/2 left-1/2 z-50 w-[100dvh] h-[100vw] -translate-x-1/2 -translate-y-1/2 rotate-90 origin-center rounded-none border-0 bg-black'
+    : isFullscreen
+      ? 'fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 bg-black'
       : isDeviceLandscape
         ? 'fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 bg-black'
         : isLandscape
@@ -1559,6 +1739,23 @@ export function TheaterPlayer({
   const showSideEpisodeDrawer = isFullscreen || effectiveLandscape;
   const isControlsVisible = !isCleanMode && hudVisible;
   const isCompactPortrait = !effectiveLandscape && !isFullscreen;
+  const shouldLiftLandscapeMedia =
+    isCompactPortrait && isLandscapeMedia && effectiveFit === 'contain';
+
+  // Anchor the prominent "全屏观看" CTA directly beneath the fitted horizontal video frame
+  const landscapePromptTop = useMemo(() => {
+    const stageW = stageSize.w || 390;
+    const stageH = stageSize.h || 780;
+    const safeMaxTop = Math.max(stageH * 0.52, stageH - 210);
+    if (!shouldLiftLandscapeMedia || !mediaAspectRatio) {
+      return Math.min(safeMaxTop, stageH * 0.62);
+    }
+    const wrapperH = stageH * 0.88;
+    const opticalCenterY = stageH * 0.44;
+    const renderedVideoH = Math.min(wrapperH, stageW / Math.max(mediaAspectRatio, 1.05));
+    const idealTop = opticalCenterY + renderedVideoH / 2 + 16;
+    return Math.round(Math.min(safeMaxTop, Math.max(stageH * 0.5, idealTop)));
+  }, [mediaAspectRatio, shouldLiftLandscapeMedia, stageSize.h, stageSize.w]);
 
   return (
     <div
@@ -1598,115 +1795,133 @@ export function TheaterPlayer({
                 : 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
-            {fitMode === 'contain' && activeFrameUrl && (
+            {effectiveFit === 'contain' && activeFrameUrl && (
               <img
                 src={activeFrameUrl}
                 alt=""
                 aria-hidden="true"
                 referrerPolicy="no-referrer"
-                className="absolute inset-0 h-full w-full object-cover scale-110 blur-2xl opacity-30 pointer-events-none"
+                className="absolute inset-0 h-full w-full object-cover scale-110 blur-2xl opacity-20 pointer-events-none"
               />
             )}
 
-            {/* Poster-to-First-Frame Layer */}
-            {posterStage !== 'placeholder' && resolvedPosterUrl ? (
-              <img
-                src={resolvedPosterUrl}
-                alt={drama.title}
-                referrerPolicy="no-referrer"
-                onError={() => setPosterStage('placeholder')}
-                className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
-                  hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
-                }`}
-              />
-            ) : (
-              <div
-                data-testid="cover-placeholder"
-                className={`cover-placeholder absolute inset-0 h-full w-full flex flex-col items-center justify-center p-6 bg-gradient-to-br from-[#1D202A] via-[#14161D] to-[#0B0C10] ${
-                  hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
-                }`}
-              >
-                <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-amber-400 mb-2">
-                  <Play className="w-6 h-6 fill-current ml-0.5" aria-hidden="true" />
+            {/* Media Framing Box (optically lifted in portrait for horizontal videos so bottom HUD never collides) */}
+            <div
+              className={`absolute inset-x-0 top-0 transition-[bottom] duration-200 ${
+                shouldLiftLandscapeMedia ? 'bottom-[12%]' : 'bottom-0'
+              }`}
+            >
+              {/* Poster-to-First-Frame Layer */}
+              {posterStage !== 'placeholder' && resolvedPosterUrl ? (
+                <img
+                  src={resolvedPosterUrl}
+                  alt={drama.title}
+                  referrerPolicy="no-referrer"
+                  onError={() => setPosterStage('placeholder')}
+                  className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
+                    hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
+                  }`}
+                />
+              ) : (
+                <div
+                  data-testid="cover-placeholder"
+                  className={`cover-placeholder absolute inset-0 h-full w-full flex flex-col items-center justify-center p-6 bg-gradient-to-br from-[#1D202A] via-[#14161D] to-[#0B0C10] ${
+                    hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
+                  }`}
+                >
+                  <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-amber-400 mb-2">
+                    <Play className="w-6 h-6 fill-current ml-0.5" aria-hidden="true" />
+                  </div>
+                  <span className="text-sm font-semibold text-slate-100 line-clamp-1">
+                    {drama.title}
+                  </span>
+                  <span className="text-xs text-slate-400 mt-1">
+                    第 {episode.number} 集
+                  </span>
                 </div>
-                <span className="text-sm font-semibold text-slate-100 line-clamp-1">
-                  {drama.title}
-                </span>
-                <span className="text-xs text-slate-400 mt-1">
-                  第 {episode.number} 集
-                </span>
-              </div>
-            )}
+              )}
 
-            {/* Mode A: Real HLS / MP4 Video */}
-            {hasExternalStream ? (
-              <video
-                ref={videoRef}
-                playsInline
-                preload="auto"
-                poster={resolvedPosterUrl || undefined}
-                onLoadedMetadata={(e) => {
-                  const dur = e.currentTarget.duration;
-                  if (Number.isFinite(dur) && dur > 0) setDuration(dur);
-                }}
-                onPlaying={() => {
-                  setVideoReady(true);
-                  setIsBuffering(false);
-                  setStreamError(null);
-                }}
-                onWaiting={() => setIsBuffering(true)}
-                onStalled={() => setIsBuffering(true)}
-                onTimeUpdate={(e) => {
-                  const v = e.currentTarget;
-                  setCurrentTime(v.currentTime);
-                  if (v.buffered.length > 0 && v.duration > 0) {
-                    setBufferedRatio(
-                      v.buffered.end(v.buffered.length - 1) / v.duration
-                    );
-                  }
-                  onRecordProgress(
-                    drama.id,
-                    episode.number,
-                    v.currentTime,
-                    v.duration || duration,
-                    false
-                  );
-                }}
-                onEnded={() => {
-                  onRecordProgress(drama.id, episode.number, duration, duration, true);
-                  if (autoAdvance) {
-                    handleNextEpisodeOrDrama();
-                  } else {
-                    setIsPlaying(false);
-                  }
-                }}
-                onError={() => {
-                  setIsBuffering(false);
-                  setStreamError('片源流暂时无法播放，建议切换其他极速线路或使用剧照预览。');
-                }}
-                className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
-                  videoReady ? 'opacity-100' : 'opacity-0'
-                }`}
-              />
-            ) : (
-              /* Mode B: Storyboard Preview Engine */
-              <div className="absolute inset-0 overflow-hidden">
-                {activeFrameUrl && (
-                  <img
-                    key={`${drama.id}-${episode.number}-${sceneIndex}-${fitMode}`}
-                    src={activeFrameUrl}
-                    alt={`${drama.title} 第 ${episode.number} 集`}
-                    referrerPolicy="no-referrer"
-                    onError={() =>
-                      setFailedFrames((prev) => new Set(prev).add(rawActiveFrameUrl))
+              {/* Mode A: Real HLS / MP4 Video */}
+              {hasExternalStream ? (
+                <video
+                  ref={videoRef}
+                  playsInline
+                  preload="auto"
+                  poster={resolvedPosterUrl || undefined}
+                  onLoadedMetadata={(e) => {
+                    const dur = e.currentTarget.duration;
+                    if (Number.isFinite(dur) && dur > 0) setDuration(dur);
+                    syncVideoAspectRatio(e.currentTarget);
+                  }}
+                  onResize={(e) => {
+                    syncVideoAspectRatio(e.currentTarget);
+                  }}
+                  onPlaying={(e) => {
+                    syncVideoAspectRatio(e.currentTarget);
+                    setVideoReady(true);
+                    setIsBuffering(false);
+                    setStreamError(null);
+                  }}
+                  onWaiting={() => setIsBuffering(true)}
+                  onStalled={() => setIsBuffering(true)}
+                  onTimeUpdate={(e) => {
+                    const v = e.currentTarget;
+                    setCurrentTime(v.currentTime);
+                    if (v.buffered.length > 0 && v.duration > 0) {
+                      setBufferedRatio(
+                        v.buffered.end(v.buffered.length - 1) / v.duration
+                      );
                     }
-                    className={`h-full w-full ${mediaFitClass} ${
-                      sceneIndex % 2 === 0 ? 'animate-cinema-in' : 'animate-cinema-out'
-                    } ${!isPlaying ? 'cinema-paused' : ''}`}
-                  />
-                )}
-              </div>
-            )}
+                    onRecordProgress(
+                      drama.id,
+                      episode.number,
+                      v.currentTime,
+                      v.duration || duration,
+                      false
+                    );
+                  }}
+                  onEnded={() => {
+                    onRecordProgress(drama.id, episode.number, duration, duration, true);
+                    if (autoAdvance) {
+                      handleNextEpisodeOrDrama();
+                    } else {
+                      setIsPlaying(false);
+                    }
+                  }}
+                  onError={() => {
+                    setIsBuffering(false);
+                    setStreamError('片源流暂时无法播放，建议切换其他极速线路或使用剧照预览。');
+                  }}
+                  className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
+                    videoReady ? 'opacity-100' : 'opacity-0'
+                  }`}
+                />
+              ) : (
+                /* Mode B: Storyboard Preview Engine */
+                <div className="absolute inset-0 overflow-hidden">
+                  {activeFrameUrl && (
+                    <img
+                      key={`${drama.id}-${episode.number}-${sceneIndex}-${effectiveFit}`}
+                      src={activeFrameUrl}
+                      alt={`${drama.title} 第 ${episode.number} 集`}
+                      referrerPolicy="no-referrer"
+                      onLoad={(e) => {
+                        const img = e.currentTarget;
+                        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                          setMediaAspectRatio(img.naturalWidth / img.naturalHeight);
+                        }
+                      }}
+                      onError={() =>
+                        setFailedFrames((prev) => new Set(prev).add(rawActiveFrameUrl))
+                      }
+                      className={`h-full w-full ${mediaFitClass} ${
+                        sceneIndex % 2 === 0 ? 'animate-cinema-in' : 'animate-cinema-out'
+                      } ${!isPlaying ? 'cinema-paused' : ''}`}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Screen Brightness Overlay */}
@@ -1751,7 +1966,11 @@ export function TheaterPlayer({
           {isCleanMode && (
             <div
               data-no-gesture="true"
-              className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+20px)] right-4 z-40"
+              className={`absolute z-40 ${
+                isRotatedMobileLandscape
+                  ? 'bottom-4 right-[calc(env(safe-area-inset-bottom,0px)+16px)]'
+                  : 'bottom-[calc(env(safe-area-inset-bottom,0px)+20px)] right-[calc(env(safe-area-inset-right,0px)+16px)]'
+              }`}
             >
               <button
                 type="button"
@@ -1796,7 +2015,9 @@ export function TheaterPlayer({
                 togglePlayPause();
               }
             }}
-            className="absolute inset-0 z-10 w-full h-full flex items-center justify-center focus:outline-none cursor-pointer"
+            className={`absolute inset-0 z-10 w-full h-full flex items-center justify-center focus:outline-none cursor-pointer ${
+              shouldLiftLandscapeMedia ? 'pb-[12%]' : ''
+            }`}
           >
             {!isPlaying && !streamError && !isCleanMode && (
               <span className="w-16 h-16 rounded-full bg-black/55 backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-xl pointer-events-none">
@@ -1805,9 +2026,34 @@ export function TheaterPlayer({
             )}
           </div>
 
+          {/* Prominent One-Tap Fullscreen CTA anchored beneath horizontal videos in portrait */}
+          {isCompactPortrait && isLandscapeMedia && !streamError && !isCleanMode && (
+            <div
+              data-no-gesture="true"
+              style={{ top: `${landscapePromptTop}px` }}
+              className={`absolute left-1/2 -translate-x-1/2 z-20 transition-opacity duration-200 ${
+                isControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => void toggleLandscape()}
+                aria-label="横屏全屏观看"
+                className="min-h-[40px] px-4 rounded-full bg-white/[0.12] hover:bg-white/[0.2] active:scale-95 backdrop-blur-md border border-white/20 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-lg transition-all whitespace-nowrap"
+              >
+                <Maximize className="w-3.5 h-3.5 text-amber-400 shrink-0" aria-hidden="true" />
+                <span>全屏观看</span>
+              </button>
+            </div>
+          )}
+
           {/* Buffering Indicator */}
           {isBuffering && !streamError && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <div
+              className={`absolute inset-0 z-20 flex items-center justify-center pointer-events-none ${
+                shouldLiftLandscapeMedia ? 'pb-[12%]' : ''
+              }`}
+            >
               <div className="px-4 py-2.5 rounded-2xl bg-black/75 backdrop-blur-md border border-white/15 flex items-center gap-2 text-xs text-slate-100">
                 <Loader2
                   className="w-4 h-4 animate-spin text-amber-400"
@@ -1872,10 +2118,14 @@ export function TheaterPlayer({
             </div>
           )}
 
-          {/* Top Bar inside Stage (Safe-area aware, minimal & thumb-clean) */}
+          {/* Top Bar inside Stage (Safe-area aware in both portrait & 90deg rotated landscape) */}
           <div
             data-no-gesture="true"
-            className={`absolute top-0 inset-x-0 z-20 pt-safe px-3 sm:px-4 transition-opacity duration-200 ${
+            className={`absolute top-0 inset-x-0 z-20 transition-opacity duration-200 ${
+              isRotatedMobileLandscape
+                ? 'pt-2 pl-[calc(env(safe-area-inset-top,0px)+14px)] pr-[calc(env(safe-area-inset-bottom,0px)+14px)]'
+                : 'pt-safe pl-[calc(env(safe-area-inset-left,0px)+12px)] pr-[calc(env(safe-area-inset-right,0px)+12px)] sm:px-4'
+            } ${
               isControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
             }`}
           >
@@ -1884,10 +2134,10 @@ export function TheaterPlayer({
                 <button
                   type="button"
                   onClick={() => {
-                    if (isFullscreen) {
-                      void toggleFullscreen();
-                    } else if (isLandscape) {
+                    if (isLandscape) {
                       void toggleLandscape();
+                    } else if (isFullscreen) {
+                      void toggleFullscreen();
                     } else {
                       onExitTheater?.();
                     }
@@ -2050,7 +2300,11 @@ export function TheaterPlayer({
           {/* Bottom Info + Scrubber + Iconic HongGuo Episode Bar (Portrait) OR Wide Controls (Landscape/Fullscreen) */}
           <div
             data-no-gesture="true"
-            className="absolute bottom-0 inset-x-0 z-20 px-3.5 sm:px-4 pb-[calc(env(safe-area-inset-bottom,0px)+10px)] pt-2 space-y-1.5"
+            className={`absolute bottom-0 inset-x-0 z-20 pt-2 space-y-1.5 ${
+              isRotatedMobileLandscape
+                ? 'pl-[calc(env(safe-area-inset-top,0px)+14px)] pr-[calc(env(safe-area-inset-bottom,0px)+14px)] pb-3'
+                : 'pl-[calc(env(safe-area-inset-left,0px)+14px)] pr-[calc(env(safe-area-inset-right,0px)+14px)] sm:px-4 pb-[calc(env(safe-area-inset-bottom,0px)+10px)]'
+            }`}
           >
             {isControlsVisible && isCompactPortrait && (
               <div className="pr-16 space-y-1 pointer-events-none">
@@ -2080,6 +2334,7 @@ export function TheaterPlayer({
               onSeek={handleSeek}
               showControls={isControlsVisible}
               compactPortrait={isCompactPortrait}
+              isRotated90={isRotatedMobileLandscape}
             />
 
             {/* Portrait HongGuo Bottom Strip: Full-Width Episode Trigger + Quick Speed Toggle */}
@@ -2197,18 +2452,20 @@ export function TheaterPlayer({
                     <span>竖屏</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => void toggleFullscreen()}
-                    aria-label={isFullscreen ? '退出全屏' : '全屏'}
-                    className="min-h-[40px] min-w-[40px] rounded-xl bg-white/10 hover:bg-white/15 text-white flex items-center justify-center shrink-0"
-                  >
-                    {isFullscreen ? (
-                      <Minimize className="w-4 h-4" aria-hidden="true" />
-                    ) : (
-                      <Maximize className="w-4 h-4" aria-hidden="true" />
-                    )}
-                  </button>
+                  {!isRotatedMobileLandscape && (
+                    <button
+                      type="button"
+                      onClick={() => void toggleFullscreen()}
+                      aria-label={isFullscreen ? '退出全屏' : '全屏'}
+                      className="min-h-[40px] min-w-[40px] rounded-xl bg-white/10 hover:bg-white/15 text-white flex items-center justify-center shrink-0"
+                    >
+                      {isFullscreen ? (
+                        <Minimize className="w-4 h-4" aria-hidden="true" />
+                      ) : (
+                        <Maximize className="w-4 h-4" aria-hidden="true" />
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -2232,7 +2489,11 @@ export function TheaterPlayer({
                 onClick={(e) => e.stopPropagation()}
                 className={
                   showSideEpisodeDrawer
-                    ? 'w-80 sm:w-96 max-w-[85%] h-full bg-[#14161D]/95 backdrop-blur-md border-l border-white/15 p-5 flex flex-col'
+                    ? `w-80 sm:w-96 max-w-[85%] h-full bg-[#14161D]/95 backdrop-blur-md border-l border-white/15 p-5 flex flex-col ${
+                        isRotatedMobileLandscape
+                          ? 'pr-[calc(env(safe-area-inset-bottom,0px)+18px)]'
+                          : ''
+                      }`
                     : 'animate-sheet-up w-full max-w-xl max-h-[72dvh] rounded-t-3xl bg-[#14161D] border-t border-white/15 px-4 sm:px-5 pt-2.5 pb-[calc(env(safe-area-inset-bottom,0px)+18px)] flex flex-col shadow-2xl'
                 }
               >
@@ -2266,7 +2527,11 @@ export function TheaterPlayer({
                 aria-modal="true"
                 aria-label="更多播放设置"
                 onClick={(e) => e.stopPropagation()}
-                className="animate-sheet-up w-full max-w-xl rounded-t-3xl bg-[#14161D] border-t border-white/15 px-5 pt-2.5 pb-[calc(env(safe-area-inset-bottom,0px)+20px)] space-y-5 shadow-2xl max-h-[82dvh] overflow-y-auto no-scrollbar"
+                className={`animate-sheet-up w-full max-w-xl rounded-t-3xl bg-[#14161D] border-t border-white/15 px-5 pt-2.5 space-y-5 shadow-2xl max-h-[88%] overflow-y-auto no-scrollbar ${
+                  isRotatedMobileLandscape
+                    ? 'pb-5'
+                    : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'
+                }`}
               >
                 <div className="w-10 h-1 rounded-full bg-white/20 mx-auto" />
 
@@ -2405,14 +2670,35 @@ export function TheaterPlayer({
                   <button
                     type="button"
                     onClick={() => {
-                      const nextFit: FitMode = fitMode === 'cover' ? 'contain' : 'cover';
+                      const nextFit: FitMode =
+                        fitMode === 'auto'
+                          ? 'contain'
+                          : fitMode === 'contain'
+                            ? 'cover'
+                            : 'auto';
                       setFitMode(nextFit);
-                      onNotify(nextFit === 'contain' ? '画面：完整适应' : '画面：全屏铺满');
+                      onNotify(
+                        nextFit === 'auto'
+                          ? '画面：智能适配（横屏完整 / 竖屏铺满）'
+                          : nextFit === 'contain'
+                            ? '画面：完整显示'
+                            : '画面：铺满屏幕'
+                      );
                     }}
-                    className="min-h-[58px] px-2 rounded-2xl bg-[#1D202A] text-slate-200 flex flex-col items-center justify-center gap-1 text-xs transition-colors hover:bg-white/10"
+                    className={`min-h-[58px] px-2 rounded-2xl flex flex-col items-center justify-center gap-1 text-xs transition-colors border ${
+                      fitMode !== 'auto'
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-semibold'
+                        : 'bg-[#1D202A] border-transparent text-slate-200 hover:bg-white/10'
+                    }`}
                   >
                     <Ratio className="w-4 h-4 text-amber-400" aria-hidden="true" />
-                    <span>{fitMode === 'cover' ? '画面：铺满' : '画面：适应'}</span>
+                    <span>
+                      {fitMode === 'auto'
+                        ? '画面：智能'
+                        : fitMode === 'contain'
+                          ? '画面：完整'
+                          : '画面：铺满'}
+                    </span>
                   </button>
 
                   {onOpenLineSelector && (

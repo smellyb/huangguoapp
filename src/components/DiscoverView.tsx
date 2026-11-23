@@ -13,8 +13,11 @@ import {
 import {
   deriveHomeSections,
   deriveRankings,
+  fetchChannelDramas,
   fetchDramasByTag,
+  fetchHomeSections,
   fetchOfficialTags,
+  type HomeSectionsData,
 } from '../services/dramaApi';
 import {
   POPULAR_TAGS,
@@ -92,6 +95,17 @@ export function DiscoverView({
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [showGenreSheet, setShowGenreSheet] = useState(false);
   const [channelSubFilter, setChannelSubFilter] = useState<'latest' | 'hot' | 'recommended' | 'all' | 'manju' | 'duanju'>('latest');
+
+  // Live Homepage Sections parsed from https://huangguoai.com/
+  const [liveHomeSections, setLiveHomeSections] = useState<HomeSectionsData | null>(null);
+
+  // Channel remote pagination (1879+ dramas: 短剧 1758+, 漫剧 121+, 原创 268+)
+  const [channelRemoteDramas, setChannelRemoteDramas] = useState<Drama[]>([]);
+  const [channelTotalCount, setChannelTotalCount] = useState<number | undefined>();
+  const [channelPage, setChannelPage] = useState(1);
+  const [channelHasMore, setChannelHasMore] = useState(false);
+  const [isChannelLoading, setIsChannelLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Official 9-Category Tags from huangguoai.com
   const [tagCategories, setTagCategories] = useState<OfficialTagCategory[]>(() => OFFICIAL_TAGS_DATA as OfficialTagCategory[]);
@@ -189,6 +203,88 @@ export function DiscoverView({
     };
   }, [apiBaseUrl, selectedGenre]);
 
+  // Fetch live homepage sections from huangguoai.com HTML
+  useEffect(() => {
+    let active = true;
+    fetchHomeSections(apiBaseUrl, dramas, topics).then((sections) => {
+      if (active && sections) {
+        setLiveHomeSections(sections);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl, dramas, topics]);
+
+  // Fetch remote channel dramas with pagination when browsing a channel
+  useEffect(() => {
+    if (activeChannel === '全部' || activeChannel === '专题' || selectedGenre !== '全部') {
+      setChannelRemoteDramas([]);
+      setChannelTotalCount(undefined);
+      setChannelPage(1);
+      setChannelHasMore(false);
+      setIsChannelLoading(false);
+      return;
+    }
+
+    let active = true;
+    setIsChannelLoading(true);
+    setChannelPage(1);
+
+    fetchChannelDramas(
+      apiBaseUrl || '',
+      activeChannel,
+      1,
+      sortMode === 'hot' ? 'hot' : 'new',
+      24
+    )
+      .then((res) => {
+        if (!active) return;
+        setChannelRemoteDramas(res.dramas);
+        setChannelTotalCount(res.total);
+        setChannelPage(1);
+        setChannelHasMore(res.hasMore);
+      })
+      .catch((err) => {
+        console.warn(`[DiscoverView] Failed to fetch channel dramas:`, err);
+      })
+      .finally(() => {
+        if (active) {
+          setIsChannelLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeChannel, sortMode, apiBaseUrl, selectedGenre]);
+
+  const handleLoadMoreChannel = () => {
+    if (isLoadingMore || !channelHasMore) return;
+    setIsLoadingMore(true);
+    const nextPage = channelPage + 1;
+
+    fetchChannelDramas(
+      apiBaseUrl || '',
+      activeChannel,
+      nextPage,
+      sortMode === 'hot' ? 'hot' : 'new',
+      24
+    )
+      .then((res) => {
+        setChannelRemoteDramas((prev) => [...prev, ...res.dramas]);
+        setChannelTotalCount(res.total);
+        setChannelPage(nextPage);
+        setChannelHasMore(res.hasMore);
+      })
+      .catch((err) => {
+        console.warn(`[DiscoverView] Failed to load more channel dramas:`, err);
+      })
+      .finally(() => {
+        setIsLoadingMore(false);
+      });
+  };
+
   const handleSelectChannel = (channel: string) => {
     setActiveChannel(channel);
     setSelectedTopic(null);
@@ -216,39 +312,59 @@ export function DiscoverView({
       return matched.length > 0 ? matched : dramas;
     }
 
-    let list = dramas;
+    if (selectedGenre !== '全部') {
+      if (tagRemoteDramas.length > 0) {
+        return tagRemoteDramas;
+      }
+      const target = selectedGenre.toLowerCase();
+      return dramas.filter(
+        (d) =>
+          d.genres.some((genre) => genre.toLowerCase() === target) ||
+          d.category.toLowerCase() === target ||
+          d.title.toLowerCase().includes(target) ||
+          d.tagline.toLowerCase().includes(target) ||
+          d.synopsis.toLowerCase().includes(target)
+      );
+    }
 
     if (
       activeChannel !== '全部' &&
       activeChannel !== '排行榜' &&
       activeChannel !== '专题'
     ) {
+      if (channelRemoteDramas.length > 0) {
+        return channelRemoteDramas;
+      }
+      let list = dramas;
       if (activeChannel === '黄果原创') {
         let originals = list.filter(
           (d) =>
             d.isFeatured ||
             d.studio.includes('黄果') ||
             d.category === '短剧' ||
-            d.category === '漫剧'
+            d.category === '漫剧' ||
+            d.category === '黄果原创'
         );
         if (channelSubFilter === 'manju') {
           originals = originals.filter((d) => d.category === '漫剧');
         } else if (channelSubFilter === 'duanju') {
           originals = originals.filter((d) => d.category === '短剧');
         }
-        list = originals.length > 0 ? originals : list;
+        return originals.length > 0 ? originals : list;
       } else if (activeChannel === '短剧') {
         list = list.filter((d) => d.category === '短剧' || d.category === '全部');
         if (channelSubFilter === 'recommended') {
           list = list.filter((d) => Boolean(d.isFeatured || (d.rating && d.rating >= 9.5)));
         }
+        return list;
       } else if (activeChannel === '漫剧') {
         list = list.filter((d) => d.category === '漫剧');
         if (channelSubFilter === 'recommended') {
           list = list.filter((d) => Boolean(d.isFeatured || (d.rating && d.rating >= 9.5)));
         }
+        return list;
       } else {
-        list = list.filter(
+        return list.filter(
           (d) =>
             d.category === activeChannel ||
             d.genres.some((genre) => genre.toLowerCase() === activeChannel.toLowerCase()) ||
@@ -258,26 +374,13 @@ export function DiscoverView({
       }
     }
 
-    if (selectedGenre !== '全部') {
-      if (tagRemoteDramas.length > 0) {
-        list = tagRemoteDramas;
-      } else {
-        const target = selectedGenre.toLowerCase();
-        list = list.filter(
-          (d) =>
-            d.genres.some((genre) => genre.toLowerCase() === target) ||
-            d.category.toLowerCase() === target ||
-            d.title.toLowerCase().includes(target) ||
-            d.tagline.toLowerCase().includes(target) ||
-            d.synopsis.toLowerCase().includes(target)
-        );
-      }
-    }
-
-    return list;
-  }, [dramas, activeChannel, channelSubFilter, selectedGenre, selectedTopic, tagRemoteDramas]);
+    return dramas;
+  }, [dramas, activeChannel, channelSubFilter, selectedGenre, selectedTopic, tagRemoteDramas, channelRemoteDramas]);
 
   const sortedDramas = useMemo(() => {
+    if (channelRemoteDramas.length > 0 && selectedGenre === '全部') {
+      return channelRemoteDramas;
+    }
     const list = [...filteredDramas];
     const effectiveSort =
       activeChannel !== '全部' && (channelSubFilter === 'hot' || channelSubFilter === 'recommended' || channelSubFilter === 'latest')
@@ -294,7 +397,7 @@ export function DiscoverView({
       });
     }
     return list;
-  }, [filteredDramas, sortMode, activeChannel, channelSubFilter]);
+  }, [channelRemoteDramas, selectedGenre, filteredDramas, sortMode, activeChannel, channelSubFilter]);
 
   const rankedDramas = useMemo(
     () => deriveRankings(dramas, rankingTab).slice(0, 10),
@@ -302,8 +405,8 @@ export function DiscoverView({
   );
 
   const homeSections = useMemo(
-    () => deriveHomeSections(dramas, topics),
-    [dramas, topics]
+    () => liveHomeSections || deriveHomeSections(dramas, topics),
+    [liveHomeSections, dramas, topics]
   );
 
   if (loading) {
@@ -659,13 +762,13 @@ export function DiscoverView({
                     ? '精选独家原创短剧与漫剧'
                     : '最新更新短剧'}
                 </h2>
-                {isTagLoading ? (
+                {isTagLoading || isChannelLoading ? (
                   <span className="text-xs text-amber-400/80 animate-pulse font-normal">
                     同步中...
                   </span>
                 ) : (
                   <span className="text-xs text-slate-500 font-mono">
-                    共 {sortedDramas.length} 部
+                    共 {selectedGenre !== '全部' ? (tagTotalCount || sortedDramas.length) : (channelTotalCount || sortedDramas.length)} 部
                   </span>
                 )}
               </div>
@@ -921,6 +1024,38 @@ export function DiscoverView({
                       onSelectTag={(tag) => handleSelectGenre(tag)}
                     />
                   ))}
+                </div>
+              )}
+
+              {/* Pagination / Load More Button for Channel (支持全站 1879+ 短剧翻页) */}
+              {activeChannel !== '全部' && !isRankingOnlyView && !isTopicsOnlyView && selectedGenre === '全部' && (
+                <div className="pt-4 pb-2 flex justify-center">
+                  {channelHasMore ? (
+                    <button
+                      type="button"
+                      onClick={handleLoadMoreChannel}
+                      disabled={isLoadingMore}
+                      className="min-h-[44px] px-6 rounded-2xl bg-[#14161D] border border-white/10 hover:border-[#ffd21c]/50 text-white text-xs font-semibold inline-flex items-center gap-2 active:scale-95 transition-all shadow-lg"
+                    >
+                      {isLoadingMore ? (
+                        <>
+                          <span className="w-3.5 h-3.5 border-2 border-[#ffd21c] border-t-transparent rounded-full animate-spin" />
+                          <span>正在加载更多短剧...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>加载更多短剧 ({channelRemoteDramas.length}/{channelTotalCount || channelRemoteDramas.length})</span>
+                          <ChevronRight className="w-4 h-4 rotate-90 text-[#ffd21c]" />
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    channelRemoteDramas.length > 0 && (
+                      <p className="text-xs text-slate-500 font-mono">
+                        已加载全部 {channelTotalCount || channelRemoteDramas.length} 部短剧
+                      </p>
+                    )
+                  )}
                 </div>
               )}
             </section>

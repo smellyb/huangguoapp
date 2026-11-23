@@ -15,7 +15,7 @@ import { DEMO_DRAMAS, DEMO_TOPICS } from '../data/demoCatalog';
 import OFFICIAL_TAGS_FALLBACK from '../data/officialTags.json';
 import { resolveEncryptedPlayback } from './edgeApiCrypto';
 
-const REQUEST_TIMEOUT_MS = 10000;
+const REQUEST_TIMEOUT_MS = 18000;
 export const DEFAULT_IMAGE_CDN = 'https://pic.qnlycc.cn';
 
 export function isValidHttpUrl(rawUrl: string): boolean {
@@ -252,6 +252,9 @@ function deriveCategory(item: HuangguoVideoItem): DramaCategory {
     title.includes('漫剧')
   ) {
     return '漫剧';
+  }
+  if (item.is_original === 1) {
+    return '黄果原创';
   }
   return '短剧';
 }
@@ -773,7 +776,7 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
         ? normalizeBaseUrl(envBase)
         : envBase
           ? normalizeBaseUrl(envBase)
-          : '';
+          : normalizeBaseUrl('https://huangguoai.com');
 
   if (!activeBase) {
     return {
@@ -783,9 +786,9 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
     };
   }
 
-  // 1. Try huangguoai API first (/api/videos?page=1&size=30)
+  // 1. Try huangguoai API first (/api/videos?page=1&size=30&sort=new)
   try {
-    const huangguoUrl = `${activeBase}/api/videos?page=1&size=30`;
+    const huangguoUrl = `${activeBase}/api/videos?page=1&size=30&sort=new`;
     const res = await fetchJsonWithTimeout<{
       data?: {
         items?: HuangguoVideoItem[];
@@ -943,6 +946,151 @@ export interface HomeSectionsData {
   topics: Topic[];
 }
 
+function parseCardsFromSectionHtml(htmlChunk: string, defaultCategory: DramaCategory = '短剧'): Drama[] {
+  const cardRegex = /<div class=["']hg-drama-card["'][\s\S]*?<\/div>\s*<\/div>\s*<\/div>/g;
+  let match: RegExpExecArray | null;
+  const dramas: Drama[] = [];
+  let idx = 0;
+
+  while ((match = cardRegex.exec(htmlChunk)) !== null) {
+    const cardHtml = match[0];
+    const idMatch =
+      cardHtml.match(/data-track-item-id=["']([^"']+)["']/) ||
+      cardHtml.match(/href=["']\/video\/(\d+)\/?["']/);
+    const id = idMatch ? idMatch[1].trim() : '';
+
+    const titleMatch =
+      cardHtml.match(/data-track-item-name=["']([^"']+)["']/) ||
+      cardHtml.match(/class=["']hg-drama-card__title["'][^>]*><a[^>]*>([^<]+)<\/a>/) ||
+      cardHtml.match(/alt=["']([^"']+)["']/);
+    const title = titleMatch ? titleMatch[1].trim() : '';
+
+    if (!id || !title) continue;
+
+    const coverMatch = cardHtml.match(/data-src=["']([^"']+)["']/) || cardHtml.match(/src=["']([^"']+)["']/);
+    const posterUrl = normalizeImageUrl(coverMatch ? coverMatch[1] : '');
+
+    const scoreMatch = cardHtml.match(/class=["']hg-drama-card__score["']>([^<]+)<\/span>/);
+    const score = scoreMatch ? parseFloat(scoreMatch[1].replace('分', '')) || 9.2 : 9.2;
+
+    const epMatch = cardHtml.match(/class=["']hg-drama-card__episode["']>([^<]+)<\/span>/);
+    const epText = epMatch ? epMatch[1].trim() : '';
+    const epNumMatch = epText.match(/\d+/);
+    const totalEpisodes = epNumMatch ? parseInt(epNumMatch[0], 10) : 1;
+
+    const viewsMatch = cardHtml.match(/class=["']hg-drama-card__views["'][^>]*>([\s\S]*?)<\/span>/);
+    const views = viewsMatch ? viewsMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
+    const tags: string[] = [];
+    const tagRegex = /<span class=["']hg-tag["'][^>]*>([^<]+)<\/span>/g;
+    let tm: RegExpExecArray | null;
+    while ((tm = tagRegex.exec(cardHtml)) !== null) {
+      tags.push(tm[1].trim());
+    }
+
+    const isOriginal = cardHtml.includes('原创') || defaultCategory === '黄果原创';
+    const isNew = cardHtml.includes('新片');
+
+    dramas.push({
+      id,
+      title,
+      tagline: tags.length > 0 ? tags.slice(0, 3).join(' · ') : '精选微短剧',
+      category: defaultCategory === '黄果原创' ? '黄果原创' : (tags.includes('漫剧') ? '漫剧' : '短剧'),
+      genres: tags.length > 0 ? tags : ['都市'],
+      posterUrl,
+      heroUrl: posterUrl,
+      status: epText.includes('全') || epText.includes('完结') ? '已完结' : '连载中',
+      totalEpisodes,
+      updatedEpisodes: totalEpisodes,
+      heatScore: 10000 - idx * 150,
+      playCountLabel: views || '热播中',
+      likesBase: 3500 - idx * 80,
+      rating: score,
+      releaseYear: '2026',
+      studio: isOriginal ? '黄果原创' : '黄果短剧',
+      synopsis: `${title}，精选短剧内容。`,
+      topicIds: [],
+      isFeatured: isOriginal || idx < 3,
+      isNew,
+      episodes: Array.from({ length: totalEpisodes }, (_, i) => ({
+        number: i + 1,
+        title: `第 ${i + 1} 集`,
+        hook: '',
+        durationSeconds: 90,
+        subtitles: [],
+        posterUrl,
+      })),
+    });
+    idx++;
+  }
+  return dramas;
+}
+
+function parseTopicsFromSectionHtml(htmlChunk: string): Topic[] {
+  const topics: Topic[] = [];
+  const topicRegex = /<a class=["']hg-topic-card["'][\s\S]*?<\/a>/g;
+  let match: RegExpExecArray | null;
+  while ((match = topicRegex.exec(htmlChunk)) !== null) {
+    const tHtml = match[0];
+    const idMatch = tHtml.match(/href=["']\/topics\/([^"'/]+)\/?["']/);
+    const slug = idMatch ? idMatch[1] : '';
+    const titleMatch = tHtml.match(/class=["']hg-topic-card__title["']>([^<]+)<\/h3>/);
+    const title = titleMatch ? titleMatch[1].trim() : '';
+    const metaMatch = tHtml.match(/class=["']hg-topic-card__meta["'][^>]*><span>([^<]+)<\/span>/);
+    const countText = metaMatch ? metaMatch[1].trim() : '';
+    const descMatch = tHtml.match(/class=["']hg-topic-card__desc["']>([^<]+)<\/p>/);
+    const desc = descMatch ? descMatch[1].trim() : '';
+    const coverMatch = tHtml.match(/data-src=["']([^"']+)["']/) || tHtml.match(/src=["']([^"']+)["']/);
+    const cover = coverMatch ? normalizeImageUrl(coverMatch[1]) : '';
+
+    if (title) {
+      topics.push({
+        id: slug || title,
+        title,
+        subtitle: desc,
+        coverUrl: cover,
+        dramaIds: [],
+        accentNote: countText || '精选专辑',
+      });
+    }
+  }
+  return topics;
+}
+
+export function parseHomeSectionsFromHtml(html: string): HomeSectionsData | null {
+  const secRegex = /<section\b[^>]*class=["']([^"']*)["'][^>]*>([\s\S]*?)<\/section>/g;
+  let match: RegExpExecArray | null;
+  let original: Drama[] = [];
+  let featured: Drama[] = [];
+  let latest: Drama[] = [];
+  let hot: Drama[] = [];
+  let topics: Topic[] = [];
+
+  while ((match = secRegex.exec(html)) !== null) {
+    const content = match[2];
+    const h2Match = content.match(/<h2>([^<]+)<\/h2>/);
+    if (!h2Match) continue;
+    const sectionName = h2Match[1].trim();
+
+    if (sectionName === '黄果原创') {
+      original = parseCardsFromSectionHtml(content, '黄果原创');
+    } else if (sectionName === '精选推荐') {
+      featured = parseCardsFromSectionHtml(content);
+    } else if (sectionName === '最近上新') {
+      latest = parseCardsFromSectionHtml(content);
+    } else if (sectionName === '热播短剧') {
+      hot = parseCardsFromSectionHtml(content);
+    } else if (sectionName === '专题推荐') {
+      topics = parseTopicsFromSectionHtml(content);
+    }
+  }
+
+  if (original.length > 0 || featured.length > 0 || latest.length > 0 || hot.length > 0) {
+    return { original, featured, latest, hot, topics };
+  }
+  return null;
+}
+
 export function deriveHomeSections(dramas: Drama[], topics: Topic[]): HomeSectionsData {
   // 1. 黄果原创: category === '黄果原创' or studio includes '原创'
   const original = dramas.filter(
@@ -959,8 +1107,8 @@ export function deriveHomeSections(dramas: Drama[], topics: Topic[]): HomeSectio
       ? featured
       : [...dramas].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 6);
 
-  // 3. 最近上新: isNew or recent
-  const latest = [...dramas].sort((a, b) => (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0)).slice(0, 8);
+  // 3. 最近上新: since dramas is sorted by sort=new, first 8 items are the latest
+  const latest = [...dramas].slice(0, 8);
 
   // 4. 热播短剧: sorted by heatScore descending
   const hot = [...dramas].sort((a, b) => b.heatScore - a.heatScore).slice(0, 8);
@@ -979,45 +1127,129 @@ export async function fetchHomeSections(
   dramas: Drama[] = [],
   topics: Topic[] = []
 ): Promise<HomeSectionsData> {
-  const normalized = baseUrl ? normalizeBaseUrl(baseUrl) : '';
-  if (!normalized) {
-    return deriveHomeSections(dramas, topics);
-  }
+  const normalized = baseUrl ? normalizeBaseUrl(baseUrl) : normalizeBaseUrl('https://huangguoai.com');
+  if (normalized) {
+    try {
+      const homeUrl = normalized.endsWith('/') ? normalized : `${normalized}/`;
+      const res = await fetch(homeUrl, {
+        method: 'GET',
+        headers: {
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
 
-  try {
-    const res = await fetchJsonWithTimeout<{
-      data?: {
-        original?: HuangguoVideoItem[];
-        featured?: HuangguoVideoItem[];
-        latest?: HuangguoVideoItem[];
-        hot?: HuangguoVideoItem[];
-      };
-    }>(`${normalized}/api/site/home-sections`);
-
-    if (res?.data) {
-      const transform = (items?: HuangguoVideoItem[]) =>
-        (items || []).map((it, idx) => transformHuangguoItemToDrama(it, idx));
-
-      const original = transform(res.data.original);
-      const featured = transform(res.data.featured);
-      const latest = transform(res.data.latest);
-      const hot = transform(res.data.hot);
-
-      if (original.length || featured.length || latest.length || hot.length) {
-        return {
-          original: original.length ? original : dramas.slice(0, 6),
-          featured: featured.length ? featured : dramas.slice(0, 6),
-          latest: latest.length ? latest : dramas.slice(0, 8),
-          hot: hot.length ? hot : dramas.slice(0, 8),
-          topics,
-        };
+      if (res.ok) {
+        const html = await res.text();
+        const parsed = parseHomeSectionsFromHtml(html);
+        if (parsed && (parsed.original.length > 0 || parsed.featured.length > 0)) {
+          return {
+            original: parsed.original.length > 0 ? parsed.original : dramas.slice(0, 6),
+            featured: parsed.featured.length > 0 ? parsed.featured : dramas.slice(0, 6),
+            latest: parsed.latest.length > 0 ? parsed.latest : dramas.slice(0, 8),
+            hot: parsed.hot.length > 0 ? parsed.hot : dramas.slice(0, 8),
+            topics: parsed.topics.length > 0 ? parsed.topics : topics,
+          };
+        }
       }
+    } catch (err) {
+      console.warn('[dramaApi] fetchHomeSections HTML parse failed, falling back to derived:', err);
     }
-  } catch {
-    // Graceful fallback to deriving from loaded catalog
   }
 
   return deriveHomeSections(dramas, topics);
+}
+
+export interface ChannelDramasResult {
+  dramas: Drama[];
+  total: number;
+  page: number;
+  hasMore: boolean;
+}
+
+export async function fetchChannelDramas(
+  baseUrl: string,
+  channel: DramaCategory | string,
+  page: number = 1,
+  sortMode: 'new' | 'hot' = 'new',
+  size: number = 24
+): Promise<ChannelDramasResult> {
+  const activeBase = normalizeBaseUrl(baseUrl || 'https://huangguoai.com');
+  if (!activeBase) {
+    let filtered = DEMO_DRAMAS;
+    if (channel === '短剧') {
+      filtered = DEMO_DRAMAS.filter((d) => d.category === '短剧');
+    } else if (channel === '漫剧') {
+      filtered = DEMO_DRAMAS.filter((d) => d.category === '漫剧');
+    } else if (channel === '黄果原创') {
+      filtered = DEMO_DRAMAS.filter((d) => d.category === '黄果原创' || d.studio.includes('原创'));
+    } else if (channel === '排行榜') {
+      filtered = [...DEMO_DRAMAS].sort((a, b) => b.heatScore - a.heatScore);
+    }
+    const start = (page - 1) * size;
+    const pageItems = filtered.slice(start, start + size);
+    return {
+      dramas: pageItems,
+      total: filtered.length,
+      page,
+      hasMore: start + size < filtered.length,
+    };
+  }
+
+  const params = new URLSearchParams();
+  params.set('page', String(page));
+  params.set('size', String(size));
+
+  if (channel === '短剧') {
+    params.set('cate_id', '24');
+    params.set('sort', sortMode);
+  } else if (channel === '漫剧') {
+    params.set('cate_id', '25');
+    params.set('sort', sortMode);
+  } else if (channel === 'AI换脸') {
+    params.set('cate_id', '26');
+    params.set('sort', sortMode);
+  } else if (channel === 'AI魔改') {
+    params.set('cate_id', '27');
+    params.set('sort', sortMode);
+  } else if (channel === '黄果原创') {
+    params.set('is_original', '1');
+    params.set('sort', sortMode);
+  } else if (channel === '排行榜') {
+    params.set('sort', 'hot');
+  } else {
+    params.set('sort', sortMode);
+  }
+
+  const url = `${activeBase}/api/videos?${params.toString()}`;
+  try {
+    const res = await fetchJsonWithTimeout<{
+      data?: {
+        items?: HuangguoVideoItem[];
+        pagination?: { total: number };
+      };
+    }>(url);
+
+    const items = res?.data?.items || [];
+    const total = res?.data?.pagination?.total || items.length;
+    const dramas = items.map((item, idx) =>
+      transformHuangguoItemToDrama(item, (page - 1) * size + idx)
+    );
+
+    return {
+      dramas,
+      total,
+      page,
+      hasMore: page * size < total,
+    };
+  } catch (err) {
+    console.warn(`[dramaApi] fetchChannelDramas failed for channel=${channel}, page=${page}:`, err);
+    return {
+      dramas: [],
+      total: 0,
+      page,
+      hasMore: false,
+    };
+  }
 }
 
 export async function testCustomApiEndpoint(baseUrl: string): Promise<{

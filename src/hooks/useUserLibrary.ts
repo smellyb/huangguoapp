@@ -11,7 +11,7 @@ const DEFAULT_STATE: UserLibraryState = {
   followedIds: [],
   likedEpisodeKeys: [],
   watchHistory: [],
-  searchHistory: ['神瞳觉醒', '女友帮我操闺蜜', '短剧', '漫剧'],
+  searchHistory: ['女校唯一男教師', '前期太乖了', '选妃宴上，太子夜夜春', '短剧', '漫剧'],
   apiConfig: {
     mode: 'custom',
     baseUrl: envApiBase || 'https://huangguoai.com',
@@ -45,7 +45,7 @@ function readPersistedState(): UserLibraryState {
         baseUrl:
           typeof parsed.apiConfig?.baseUrl === 'string' && parsed.apiConfig.baseUrl.trim()
             ? parsed.apiConfig.baseUrl
-            : envApiBase,
+            : (envApiBase || 'https://huangguoai.com'),
         preferredQuality: parsed.apiConfig?.preferredQuality ?? 'auto',
       },
     };

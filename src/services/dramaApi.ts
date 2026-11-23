@@ -1,4 +1,5 @@
 import type { ApiConfig, CdnAuthConfig, Drama, DramaCategory, DramaGenre, Episode, RankingType, Topic } from '../types/drama';
+import { DEMO_DRAMAS, DEMO_TOPICS } from '../data/demoCatalog';
 import { resolveEncryptedPlayback } from './edgeApiCrypto';
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -581,9 +582,9 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
 
   if (!activeBase) {
     return {
-      dramas: [],
-      topics: [],
-      source: 'custom',
+      dramas: DEMO_DRAMAS,
+      topics: DEMO_TOPICS,
+      source: 'demo',
     };
   }
 
@@ -707,12 +708,27 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
       };
     }
   } catch (err) {
+    if (DEMO_DRAMAS.length > 0) {
+      return {
+        dramas: DEMO_DRAMAS,
+        topics: DEMO_TOPICS,
+        source: 'demo',
+      };
+    }
     const reason = err instanceof Error ? err.message : '无法连接至短剧片源接口';
     return {
       dramas: [],
       topics: [],
       source: 'custom',
       warning: `片源接口连接受阻（${reason}）。请确保本地代理开启（如 127.0.0.1:7897）。`,
+    };
+  }
+
+  if (DEMO_DRAMAS.length > 0) {
+    return {
+      dramas: DEMO_DRAMAS,
+      topics: DEMO_TOPICS,
+      source: 'demo',
     };
   }
 

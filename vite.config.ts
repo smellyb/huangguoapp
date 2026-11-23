@@ -31,5 +31,19 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3000,
     allowedHosts: true,
+    proxy: {
+      '/api-hg': {
+        target: 'https://huangguoai.com',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api-hg/, ''),
+      },
+      '/pic-hg': {
+        target: 'https://pic.qnlycc.cn',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/pic-hg/, ''),
+      },
+    },
   },
 });

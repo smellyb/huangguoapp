@@ -14,6 +14,8 @@ import {
   Captions,
   ChevronDown,
   ChevronUp,
+  Eye,
+  EyeOff,
   Film,
   Gauge,
   Heart,
@@ -33,6 +35,14 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
+import { EqualizerBars } from './player/EqualizerBars';
+import { FloatingHearts, type HeartBubble } from './player/FloatingHearts';
+import {
+  SpeedBoostHUD,
+  VerticalSliderHUD,
+  SeekHUD,
+  SwipePeekIndicator,
+} from './player/PlayerHUDs';
 import { episodeLikeKey } from '../hooks/useUserLibrary';
 import { cleanCoverUrl, fetchEpisodePlayback } from '../services/dramaApi';
 import { decryptCoverImage, getCachedDecryptedUrl } from '../services/imageDecryptor';
@@ -174,14 +184,26 @@ const EpisodeSelectorGrid = memo(function EpisodeSelectorGrid({
   onSelectEpisode,
   onClose,
 }: EpisodePanelProps) {
-  const chunkSize = 20;
+  const chunkSize = 30;
   const totalChunks = Math.ceil(drama.episodes.length / chunkSize);
   const initialChunk = Math.floor((currentEpisodeNumber - 1) / chunkSize);
   const [chunkIndex, setChunkIndex] = useState(initialChunk);
+  const activeItemRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     setChunkIndex(Math.floor((currentEpisodeNumber - 1) / chunkSize));
   }, [drama.id, currentEpisodeNumber]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      activeItemRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'center',
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [currentEpisodeNumber, chunkIndex]);
 
   const visibleEpisodes = useMemo(() => {
     const start = chunkIndex * chunkSize;
@@ -225,10 +247,10 @@ const EpisodeSelectorGrid = memo(function EpisodeSelectorGrid({
                 key={idx}
                 type="button"
                 onClick={() => setChunkIndex(idx)}
-                className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-mono tabular-nums transition-colors whitespace-nowrap shrink-0 ${
+                className={`min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-mono tabular-nums transition-colors whitespace-nowrap shrink-0 border ${
                   active
-                    ? 'bg-amber-500 text-[#0B0C10] font-semibold'
-                    : 'bg-white/[0.06] text-slate-300 hover:text-white'
+                    ? 'bg-amber-500 text-[#0B0C10] border-amber-400 font-bold shadow-md shadow-amber-500/20'
+                    : 'bg-white/[0.06] text-slate-300 border-transparent hover:text-white hover:bg-white/10'
                 }`}
               >
                 {start}-{end}
@@ -238,27 +260,35 @@ const EpisodeSelectorGrid = memo(function EpisodeSelectorGrid({
         </div>
       )}
 
-      <div className="grid grid-cols-5 gap-2.5 py-3 overflow-y-auto">
+      <div className="grid grid-cols-5 gap-2.5 py-3 overflow-y-auto no-scrollbar">
         {visibleEpisodes.map((ep) => {
           const isCurrent = ep.number === currentEpisodeNumber;
           const isWatched = ep.number < watchedMaxEpisode && !isCurrent;
           return (
             <button
               key={ep.number}
+              ref={isCurrent ? activeItemRef : undefined}
               type="button"
               onClick={() => {
                 onSelectEpisode(ep.number);
                 onClose?.();
               }}
-              className={`min-h-[44px] rounded-xl font-mono text-sm tabular-nums transition-colors flex flex-col items-center justify-center border ${
+              className={`min-h-[46px] rounded-xl font-mono text-sm tabular-nums transition-all flex flex-col items-center justify-center relative border ${
                 isCurrent
-                  ? 'bg-amber-500 text-[#0B0C10] border-amber-400 font-bold'
+                  ? 'bg-amber-500 text-[#0B0C10] border-amber-300 font-bold shadow-lg shadow-amber-500/25 scale-[1.02]'
                   : isWatched
                     ? 'bg-white/[0.04] text-slate-400 border-white/[0.06] hover:border-amber-500/40 hover:text-white'
                     : 'bg-[#1D202A] text-slate-100 border-white/[0.08] hover:border-amber-500/50 hover:text-amber-300'
               }`}
             >
               <span>{ep.number}</span>
+              {isCurrent && (
+                <EqualizerBars
+                  active={true}
+                  colorClass="bg-[#0B0C10]"
+                  className="mt-0.5 scale-90"
+                />
+              )}
             </button>
           );
         })}
@@ -412,13 +442,51 @@ export function TheaterPlayer({
   const [fitMode, setFitMode] = useState<FitMode>('cover');
   const [hudVisible, setHudVisible] = useState(true);
 
+  // Gestures & Floating Overlays (HongGuo specification)
+  const [hearts, setHearts] = useState<HeartBubble[]>([]);
+  const [isSpeedBoosting, setIsSpeedBoosting] = useState(false);
+  const [brightness, setBrightness] = useState(1.0);
+  const [volume, setVolume] = useState(1.0);
+  const [isAdjustingBrightness, setIsAdjustingBrightness] = useState(false);
+  const [isAdjustingVolume, setIsAdjustingVolume] = useState(false);
+  const [dragDeltaY, setDragDeltaY] = useState(0);
+  const [isDraggingEpisode, setIsDraggingEpisode] = useState(false);
+  const [seekHUD, setSeekHUD] = useState<{
+    visible: boolean;
+    targetTime: number;
+    deltaSeconds: number;
+  } | null>(null);
+
+  // Clean Screen Mode & Auto-Advance
+  const [isCleanMode, setIsCleanMode] = useState(false);
+  const [autoAdvance, setAutoAdvance] = useState(true);
+
   const stageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const stallAttemptsRef = useRef(0);
-  const touchStartYRef = useRef<number | null>(null);
   const currentTimeRef = useRef(initialTimeSeconds);
   const hudTimerRef = useRef<number | null>(null);
+
+  // Gesture tracking refs
+  const touchStartRef = useRef<{
+    x: number;
+    y: number;
+    time: number;
+    stageW: number;
+    stageH: number;
+    startBrightness: number;
+    startVolume: number;
+    startSeekTime: number;
+  } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const lastTapTimeRef = useRef(0);
+  const lastTapPosRef = useRef({ x: 0, y: 0 });
+  const brightnessTimerRef = useRef<number | null>(null);
+  const volumeTimerRef = useRef<number | null>(null);
+  const gestureTypeRef = useRef<
+    'none' | 'long_press' | 'seek' | 'brightness' | 'volume' | 'swipe'
+  >('none');
 
   const isFollowed = followedIds.includes(drama.id);
   const isLiked = likedEpisodeKeys.includes(
@@ -471,7 +539,7 @@ export function TheaterPlayer({
     };
   }, [isImmersiveOverlay]);
 
-  // Auto-hide HUD in Fullscreen / Landscape mode for unobstructed viewing
+  // Auto-hide HUD after 3s of inactivity during playback for immersive viewing
   const pokeHud = useCallback(() => {
     setHudVisible(true);
     if (hudTimerRef.current) {
@@ -480,38 +548,25 @@ export function TheaterPlayer({
     }
 
     if (
-      (isFullscreen || effectiveLandscape) &&
       isPlaying &&
       !showEpisodeSheet &&
       !showQualityMenu &&
-      !showSpeedMenu
+      !showSpeedMenu &&
+      !isSpeedBoosting
     ) {
       hudTimerRef.current = window.setTimeout(() => {
         setHudVisible(false);
-      }, 3500);
+      }, 3000);
     }
   }, [
-    effectiveLandscape,
-    isFullscreen,
     isPlaying,
     showEpisodeSheet,
     showQualityMenu,
     showSpeedMenu,
+    isSpeedBoosting,
   ]);
 
   useEffect(() => {
-    if (
-      !isFullscreen &&
-      !effectiveLandscape
-    ) {
-      setHudVisible(true);
-      if (hudTimerRef.current) {
-        window.clearTimeout(hudTimerRef.current);
-        hudTimerRef.current = null;
-      }
-      return;
-    }
-
     if (!isPlaying || showEpisodeSheet || showQualityMenu || showSpeedMenu) {
       setHudVisible(true);
       if (hudTimerRef.current) {
@@ -529,8 +584,6 @@ export function TheaterPlayer({
       }
     };
   }, [
-    effectiveLandscape,
-    isFullscreen,
     isPlaying,
     pokeHud,
     showEpisodeSheet,
@@ -641,23 +694,13 @@ export function TheaterPlayer({
     onRecordProgress,
   ]);
 
-  // Trigger silent next-episode preload once playback passes 60% or final 15s
+  // Trigger silent next-episode preload once playback passes 40% or final 20s (HongGuo architecture)
   useEffect(() => {
     if (!nextEpisode || preloadTriggered) return;
     const ratio = duration > 0 ? currentTime / duration : 0;
     const remaining = duration - currentTime;
-    if (ratio >= 0.6 || (duration > 20 && remaining <= 15)) {
-      if (nextEpisode && !nextEpisode.hlsUrl && apiBaseUrl) {
-        fetchEpisodePlayback(apiBaseUrl, drama.id, nextEpisode.number).then((info) => {
-          if (info?.streamUrl) {
-            nextEpisode.hlsUrl = info.streamUrl;
-            if (info.cdn) nextEpisode.cdn = info.cdn;
-            preloadNextEpisode(drama.id, nextEpisode);
-          }
-        });
-      } else {
-        preloadNextEpisode(drama.id, nextEpisode);
-      }
+    if (ratio >= 0.4 || (duration > 15 && remaining <= 20)) {
+      preloadNextEpisode(drama.id, nextEpisode, apiBaseUrl);
       setPreloadTriggered(true);
     }
   }, [apiBaseUrl, currentTime, duration, drama.id, nextEpisode, preloadTriggered]);
@@ -727,8 +770,9 @@ export function TheaterPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: 24,
+        maxBufferLength: 30,
         maxMaxBufferLength: 60,
+        backBufferLength: 10,
         startFragPrefetch: true,
         capLevelToPlayerSize: true,
         fragLoadingTimeOut: 10000,
@@ -865,7 +909,11 @@ export function TheaterPlayer({
         if (next >= duration) {
           window.clearInterval(timer);
           onRecordProgress(drama.id, episode.number, duration, duration, true);
-          window.setTimeout(() => handleNextEpisodeOrDrama(), 200);
+          if (autoAdvance) {
+            window.setTimeout(() => handleNextEpisodeOrDrama(), 200);
+          } else {
+            setIsPlaying(false);
+          }
           return duration;
         }
         onRecordProgress(drama.id, episode.number, next, duration, false);
@@ -978,30 +1026,232 @@ export function TheaterPlayer({
     togglePlayPause,
   ]);
 
-  // Mobile swipe gesture (vertical in portrait, horizontal/vertical aware)
+  // Gesture State Machine: Double-tap, Long-press speed, Volume/Brightness, Horizontal Seek, and Vertical Swipe
   const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const stage = stageRef.current;
+    const rect = stage?.getBoundingClientRect();
+    const stageW = rect?.width || window.innerWidth;
+    const stageH = rect?.height || window.innerHeight;
+    const touchX = touch.clientX - (rect?.left || 0);
+    const touchY = touch.clientY - (rect?.top || 0);
+
     pokeHud();
-    if (isRotatedMobileLandscape) {
-      touchStartYRef.current = event.touches[0]?.clientX ?? null;
-    } else {
-      touchStartYRef.current = event.touches[0]?.clientY ?? null;
+
+    const now = Date.now();
+    const tapInterval = now - lastTapTimeRef.current;
+    const dist = Math.hypot(
+      touch.clientX - lastTapPosRef.current.x,
+      touch.clientY - lastTapPosRef.current.y
+    );
+
+    // Double-tap to like: < 280ms and dist < 35px
+    if (tapInterval < 280 && dist < 35) {
+      if (longPressTimerRef.current) {
+        window.clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      gestureTypeRef.current = 'none';
+      lastTapTimeRef.current = 0;
+
+      // Spawn animated floating heart at touch coordinates
+      const newHeart: HeartBubble = {
+        id: Date.now() + Math.random(),
+        x: touchX,
+        y: touchY,
+        rotate: (Math.random() - 0.5) * 30,
+      };
+      setHearts((prev) => [...prev, newHeart]);
+      window.setTimeout(() => {
+        setHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
+      }, 850);
+
+      // Trigger 20ms haptic feedback
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(20);
+      }
+
+      if (!isLiked) {
+        onToggleLike(drama.id, episode.number);
+      }
+      return;
+    }
+
+    lastTapTimeRef.current = now;
+    lastTapPosRef.current = { x: touch.clientX, y: touch.clientY };
+    gestureTypeRef.current = 'none';
+
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: now,
+      stageW,
+      stageH,
+      startBrightness: brightness,
+      startVolume: videoRef.current ? videoRef.current.volume : volume,
+      startSeekTime: currentTimeRef.current,
+    };
+
+    // Long press > 450ms activates 2.0x boost
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = window.setTimeout(() => {
+      if (gestureTypeRef.current === 'none') {
+        gestureTypeRef.current = 'long_press';
+        setIsSpeedBoosting(true);
+        if (videoRef.current) {
+          videoRef.current.playbackRate = 2.0;
+        }
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate(20);
+        }
+      }
+    }, 450);
+  };
+
+  const handleTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+    if (!touchStartRef.current || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const start = touchStartRef.current;
+    const dx = isRotatedMobileLandscape
+      ? touch.clientY - start.y
+      : touch.clientX - start.x;
+    const dy = isRotatedMobileLandscape
+      ? start.x - touch.clientX
+      : touch.clientY - start.y;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    // If movement > 10px, cancel long-press timer
+    if (Math.hypot(dx, dy) > 10 && longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+
+    if (gestureTypeRef.current === 'long_press') {
+      return;
+    }
+
+    // Identify gesture type if not locked yet
+    if (gestureTypeRef.current === 'none') {
+      if (absDx > 15 && absDx > absDy * 1.2) {
+        gestureTypeRef.current = 'seek';
+      } else if (absDy > 15 && absDy > absDx * 1.2) {
+        const rect = stageRef.current?.getBoundingClientRect();
+        const relStartX = start.x - (rect?.left || 0);
+        if (relStartX < start.stageW * 0.35) {
+          gestureTypeRef.current = 'brightness';
+        } else if (relStartX > start.stageW * 0.65) {
+          gestureTypeRef.current = 'volume';
+        } else {
+          gestureTypeRef.current = 'swipe';
+        }
+      }
+    }
+
+    if (gestureTypeRef.current === 'seek') {
+      const deltaSec = (dx / start.stageW) * Math.min(120, duration * 0.4);
+      const targetTime = Math.max(0, Math.min(duration, start.startSeekTime + deltaSec));
+      setSeekHUD({
+        visible: true,
+        targetTime,
+        deltaSeconds: deltaSec,
+      });
+    } else if (gestureTypeRef.current === 'brightness') {
+      const nextB = Math.max(0.15, Math.min(1.0, start.startBrightness - (dy / start.stageH) * 1.3));
+      setBrightness(nextB);
+      setIsAdjustingBrightness(true);
+      if (brightnessTimerRef.current) window.clearTimeout(brightnessTimerRef.current);
+    } else if (gestureTypeRef.current === 'volume') {
+      const nextV = Math.max(0, Math.min(1.0, start.startVolume - (dy / start.stageH) * 1.3));
+      setVolume(nextV);
+      setIsAdjustingVolume(true);
+      if (videoRef.current) {
+        videoRef.current.volume = nextV;
+        if (nextV > 0 && isMuted) setIsMuted(false);
+      }
+      if (volumeTimerRef.current) window.clearTimeout(volumeTimerRef.current);
+    } else if (gestureTypeRef.current === 'swipe') {
+      setIsDraggingEpisode(true);
+      const isBoundary =
+        (episode.number <= 1 && dy > 0) ||
+        (episode.number >= drama.episodes.length && dy < 0);
+      const effectiveDy = isBoundary ? dy * 0.25 : dy * 0.8;
+      setDragDeltaY(effectiveDy);
     }
   };
 
-  const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
-    if (touchStartYRef.current === null) return;
-    const endCoord = isRotatedMobileLandscape
-      ? (event.changedTouches[0]?.clientX ?? touchStartYRef.current)
-      : (event.changedTouches[0]?.clientY ?? touchStartYRef.current);
-    const delta = touchStartYRef.current - endCoord;
-    touchStartYRef.current = null;
-
-    if (Math.abs(delta) < 65) return;
-    if (delta > 0) {
-      handleNextEpisodeOrDrama();
-    } else {
-      handlePrevEpisodeOrDrama();
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
     }
+
+    if (gestureTypeRef.current === 'long_press') {
+      setIsSpeedBoosting(false);
+      if (videoRef.current) {
+        videoRef.current.playbackRate = playbackRate;
+      }
+      gestureTypeRef.current = 'none';
+      touchStartRef.current = null;
+      return;
+    }
+
+    if (gestureTypeRef.current === 'seek') {
+      if (seekHUD) {
+        handleSeek(seekHUD.targetTime);
+        setSeekHUD(null);
+      }
+      gestureTypeRef.current = 'none';
+      touchStartRef.current = null;
+      return;
+    }
+
+    if (gestureTypeRef.current === 'brightness') {
+      brightnessTimerRef.current = window.setTimeout(() => {
+        setIsAdjustingBrightness(false);
+      }, 700);
+      gestureTypeRef.current = 'none';
+      touchStartRef.current = null;
+      return;
+    }
+
+    if (gestureTypeRef.current === 'volume') {
+      volumeTimerRef.current = window.setTimeout(() => {
+        setIsAdjustingVolume(false);
+      }, 700);
+      gestureTypeRef.current = 'none';
+      touchStartRef.current = null;
+      return;
+    }
+
+    if (gestureTypeRef.current === 'swipe') {
+      const currentDy = dragDeltaY;
+      setDragDeltaY(0);
+      setIsDraggingEpisode(false);
+
+      if (currentDy < -65) {
+        if (episode.number >= drama.episodes.length) {
+          onNotify('已经是最后一集了');
+        } else {
+          handleNextEpisodeOrDrama();
+        }
+      } else if (currentDy > 65) {
+        if (episode.number <= 1) {
+          onNotify('已经是第一集了');
+        } else {
+          handlePrevEpisodeOrDrama();
+        }
+      }
+      gestureTypeRef.current = 'none';
+      touchStartRef.current = null;
+      return;
+    }
+
+    gestureTypeRef.current = 'none';
+    touchStartRef.current = null;
   };
 
   const handleShare = async () => {
@@ -1121,6 +1371,7 @@ export function TheaterPlayer({
           : 'relative w-full h-[calc(100dvh-64px)] lg:h-[calc(100dvh-116px)] lg:max-h-[820px] lg:w-[430px] xl:w-[460px] lg:rounded-3xl bg-black border-0 lg:border lg:border-white/[0.1] shrink-0';
 
   const showSideEpisodeDrawer = isFullscreen || effectiveLandscape;
+  const isControlsVisible = !isCleanMode && hudVisible;
 
   return (
     <div
@@ -1139,120 +1390,196 @@ export function TheaterPlayer({
       >
         {/* Main Theater Stage (Supports Vertical, Landscape Widescreen, and True/Immersive Fullscreen) */}
         <div
+          id="theater-stage"
+          data-testid="theater-stage"
           ref={stageRef}
           onMouseMove={pokeHud}
           onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
           className={`${stageContainerClass} overflow-hidden select-none`}
         >
-          {/* Ambient Blurred Backdrop when in "适应 (contain)" mode so pillarbox/letterbox feels cinematic */}
-          {fitMode === 'contain' && (
-            <img
-              src={activeFrameUrl}
-              alt=""
-              aria-hidden="true"
-              referrerPolicy="no-referrer"
-              className="absolute inset-0 h-full w-full object-cover scale-110 blur-2xl opacity-30 pointer-events-none"
-            />
-          )}
-
-          {/* Poster-to-First-Frame Zero-Black-Flash Layer */}
-          {posterStage !== 'placeholder' && resolvedPosterUrl ? (
-            <img
-              src={resolvedPosterUrl}
-              alt={drama.title}
-              referrerPolicy="no-referrer"
-              onError={handlePosterError}
-              className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
-                hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
-              }`}
-            />
-          ) : (
-            <div
-              data-testid="cover-placeholder"
-              className={`cover-placeholder absolute inset-0 h-full w-full flex flex-col items-center justify-center p-6 bg-gradient-to-br from-[#1D202A] via-[#14161D] to-[#0B0C10] ${
-                hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
-              }`}
-            >
-              <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-amber-400 mb-2">
-                <Play className="w-6 h-6 fill-current ml-0.5" aria-hidden="true" />
-              </div>
-              <span className="text-sm font-semibold text-slate-100 line-clamp-1">{drama.title}</span>
-              <span className="text-xs text-slate-400 mt-1">第 {episode.number} 集</span>
-            </div>
-          )}
-
-          {/* Mode A: Real HLS / MP4 Video Stream */}
-          {hasExternalStream ? (
-            <video
-              ref={videoRef}
-              playsInline
-              preload="auto"
-              poster={resolvedPosterUrl || undefined}
-              onLoadedMetadata={(e) => {
-                const dur = e.currentTarget.duration;
-                if (Number.isFinite(dur) && dur > 0) setDuration(dur);
-              }}
-              onPlaying={() => {
-                setVideoReady(true);
-                setIsBuffering(false);
-                setStreamError(null);
-              }}
-              onWaiting={() => setIsBuffering(true)}
-              onStalled={() => setIsBuffering(true)}
-              onTimeUpdate={(e) => {
-                const v = e.currentTarget;
-                setCurrentTime(v.currentTime);
-                if (v.buffered.length > 0 && v.duration > 0) {
-                  setBufferedRatio(
-                    v.buffered.end(v.buffered.length - 1) / v.duration
-                  );
-                }
-                onRecordProgress(
-                  drama.id,
-                  episode.number,
-                  v.currentTime,
-                  v.duration || duration,
-                  false
-                );
-              }}
-              onEnded={() => {
-                onRecordProgress(drama.id, episode.number, duration, duration, true);
-                handleNextEpisodeOrDrama();
-              }}
-              onError={() => {
-                setIsBuffering(false);
-                setStreamError('片源流无法直接播放，建议切换其他极速直连线路或使用剧照预览播放。');
-              }}
-              className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
-                videoReady ? 'opacity-100' : 'opacity-0'
-              }`}
-            />
-          ) : (
-            /* Mode B: Built-in 60fps GPU-Composited Storyboard Preview Engine */
-            <div className="absolute inset-0 overflow-hidden">
+          {/* Gestural Vertical Drag & Peeking Canvas */}
+          <div
+            className="absolute inset-0 w-full h-full overflow-hidden"
+            style={{
+              transform: dragDeltaY !== 0 ? `translate3d(0, ${dragDeltaY}px, 0)` : undefined,
+              transition: isDraggingEpisode
+                ? 'none'
+                : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          >
+            {/* Ambient Blurred Backdrop when in "适应 (contain)" mode so pillarbox/letterbox feels cinematic */}
+            {fitMode === 'contain' && (
               <img
-                key={`${drama.id}-${episode.number}-${sceneIndex}-${fitMode}`}
                 src={activeFrameUrl}
-                alt={`${drama.title} 第 ${episode.number} 集`}
+                alt=""
+                aria-hidden="true"
                 referrerPolicy="no-referrer"
-                onError={handleActiveFrameError}
-                className={`h-full w-full ${mediaFitClass} ${
-                  sceneIndex % 2 === 0 ? 'animate-cinema-in' : 'animate-cinema-out'
-                } ${!isPlaying ? 'cinema-paused' : ''}`}
+                className="absolute inset-0 h-full w-full object-cover scale-110 blur-2xl opacity-30 pointer-events-none"
               />
+            )}
+
+            {/* Poster-to-First-Frame Zero-Black-Flash Layer */}
+            {posterStage !== 'placeholder' && resolvedPosterUrl ? (
+              <img
+                src={resolvedPosterUrl}
+                alt={drama.title}
+                referrerPolicy="no-referrer"
+                onError={handlePosterError}
+                className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
+                  hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
+                }`}
+              />
+            ) : (
+              <div
+                data-testid="cover-placeholder"
+                className={`cover-placeholder absolute inset-0 h-full w-full flex flex-col items-center justify-center p-6 bg-gradient-to-br from-[#1D202A] via-[#14161D] to-[#0B0C10] ${
+                  hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
+                }`}
+              >
+                <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-amber-400 mb-2">
+                  <Play className="w-6 h-6 fill-current ml-0.5" aria-hidden="true" />
+                </div>
+                <span className="text-sm font-semibold text-slate-100 line-clamp-1">{drama.title}</span>
+                <span className="text-xs text-slate-400 mt-1">第 {episode.number} 集</span>
+              </div>
+            )}
+
+            {/* Mode A: Real HLS / MP4 Video Stream */}
+            {hasExternalStream ? (
+              <video
+                ref={videoRef}
+                playsInline
+                preload="auto"
+                poster={resolvedPosterUrl || undefined}
+                onLoadedMetadata={(e) => {
+                  const dur = e.currentTarget.duration;
+                  if (Number.isFinite(dur) && dur > 0) setDuration(dur);
+                }}
+                onPlaying={() => {
+                  setVideoReady(true);
+                  setIsBuffering(false);
+                  setStreamError(null);
+                }}
+                onWaiting={() => setIsBuffering(true)}
+                onStalled={() => setIsBuffering(true)}
+                onTimeUpdate={(e) => {
+                  const v = e.currentTarget;
+                  setCurrentTime(v.currentTime);
+                  if (v.buffered.length > 0 && v.duration > 0) {
+                    setBufferedRatio(
+                      v.buffered.end(v.buffered.length - 1) / v.duration
+                    );
+                  }
+                  onRecordProgress(
+                    drama.id,
+                    episode.number,
+                    v.currentTime,
+                    v.duration || duration,
+                    false
+                  );
+                }}
+                onEnded={() => {
+                  onRecordProgress(drama.id, episode.number, duration, duration, true);
+                  if (autoAdvance) {
+                    handleNextEpisodeOrDrama();
+                  } else {
+                    setIsPlaying(false);
+                  }
+                }}
+                onError={() => {
+                  setIsBuffering(false);
+                  setStreamError('片源流无法直接播放，建议切换其他极速直连线路或使用剧照预览播放。');
+                }}
+                className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
+                  videoReady ? 'opacity-100' : 'opacity-0'
+                }`}
+              />
+            ) : (
+              /* Mode B: Built-in 60fps GPU-Composited Storyboard Preview Engine */
+              <div className="absolute inset-0 overflow-hidden">
+                <img
+                  key={`${drama.id}-${episode.number}-${sceneIndex}-${fitMode}`}
+                  src={activeFrameUrl}
+                  alt={`${drama.title} 第 ${episode.number} 集`}
+                  referrerPolicy="no-referrer"
+                  onError={handleActiveFrameError}
+                  className={`h-full w-full ${mediaFitClass} ${
+                    sceneIndex % 2 === 0 ? 'animate-cinema-in' : 'animate-cinema-out'
+                  } ${!isPlaying ? 'cinema-paused' : ''}`}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Screen Brightness Overlay Filter (Hardware Accelerated) */}
+          <div
+            className="absolute inset-0 bg-black pointer-events-none transition-opacity duration-75 z-20"
+            style={{ opacity: Math.max(0, 1 - brightness) }}
+            aria-hidden="true"
+          />
+
+          {/* Floating Bursting Hearts on Double-Tap */}
+          <FloatingHearts hearts={hearts} />
+
+          {/* Gestures HUD Overlays */}
+          <SpeedBoostHUD visible={isSpeedBoosting} rate={2.0} />
+          <VerticalSliderHUD
+            visible={isAdjustingBrightness}
+            type="brightness"
+            value={brightness}
+          />
+          <VerticalSliderHUD
+            visible={isAdjustingVolume}
+            type="volume"
+            value={volume}
+            isMuted={isMuted}
+          />
+          <SeekHUD
+            visible={Boolean(seekHUD?.visible)}
+            targetTime={seekHUD?.targetTime ?? 0}
+            duration={duration}
+            deltaSeconds={seekHUD?.deltaSeconds ?? 0}
+          />
+          <SwipePeekIndicator
+            dragDeltaY={dragDeltaY}
+            currentEpisode={episode.number}
+            totalEpisodes={drama.episodes.length}
+            nextEpisodeTitle={nextEpisode?.title}
+            prevEpisodeTitle={
+              drama.episodes.find((ep) => ep.number === episode.number - 1)?.title
+            }
+          />
+
+          {/* Clean Screen Mode Floating Exit Button */}
+          {isCleanMode && (
+            <div className="absolute bottom-6 right-6 z-40 animate-in fade-in duration-200">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCleanMode(false);
+                  pokeHud();
+                }}
+                aria-label="退出清屏"
+                className="px-3.5 py-1.5 rounded-full bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/20 text-xs text-white font-medium inline-flex items-center gap-1.5 shadow-2xl active:scale-95 transition-all"
+              >
+                <Eye className="w-3.5 h-3.5 text-amber-400" />
+                <span>退出清屏</span>
+              </button>
             </div>
           )}
 
           {/* Measured Cinematic Scrims (auto-fade with HUD in immersive modes) */}
           <div
             className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/80 via-black/35 to-transparent pointer-events-none transition-opacity duration-200 ${
-              hudVisible ? 'opacity-100' : 'opacity-0'
+              isControlsVisible ? 'opacity-100' : 'opacity-0'
             }`}
           />
           <div
             className={`absolute inset-x-0 bottom-0 h-64 bg-gradient-to-t from-black/90 via-black/55 to-transparent pointer-events-none transition-opacity duration-200 ${
-              hudVisible ? 'opacity-100' : 'opacity-0'
+              isControlsVisible ? 'opacity-100' : 'opacity-0'
             }`}
           />
 
@@ -1262,7 +1589,12 @@ export function TheaterPlayer({
             onClick={() => {
               setShowQualityMenu(false);
               setShowSpeedMenu(false);
-              if ((isFullscreen || effectiveLandscape) && !hudVisible) {
+              if (isCleanMode) {
+                setIsCleanMode(false);
+                pokeHud();
+                return;
+              }
+              if (!hudVisible) {
                 pokeHud();
                 return;
               }
@@ -1274,7 +1606,7 @@ export function TheaterPlayer({
             aria-label={isPlaying ? '暂停播放' : '继续播放'}
             className="absolute inset-0 z-10 w-full h-full flex items-center justify-center focus:outline-none"
           >
-            {!isPlaying && !streamError && (
+            {!isPlaying && !streamError && !isCleanMode && (
               <span className="w-16 h-16 rounded-full bg-black/55 backdrop-blur-md border border-white/20 flex items-center justify-center text-white transition-transform duration-150 scale-100">
                 <Play className="w-7 h-7 fill-current ml-1" aria-hidden="true" />
               </span>
@@ -1349,7 +1681,7 @@ export function TheaterPlayer({
           {/* Top Bar inside Stage */}
           <div
             className={`absolute top-0 inset-x-0 z-20 p-3.5 sm:p-4 flex items-center justify-between gap-3 transition-opacity duration-200 ${
-              hudVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              isControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
             }`}
           >
             <div className="min-w-0 flex items-center gap-2.5">
@@ -1449,7 +1781,11 @@ export function TheaterPlayer({
 
           {/* Right-Edge Ergonomic Thumb Action Rail (Portrait Mode Only; in Landscape/Fullscreen actions move to bottom bar to keep cinema frame wide open) */}
           {!effectiveLandscape && !isFullscreen && (
-            <div className="absolute right-3 bottom-36 z-20 flex flex-col items-center gap-2.5">
+            <div
+              className={`absolute right-3 bottom-36 z-20 flex flex-col items-center gap-2.5 transition-opacity duration-200 ${
+                isControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
+            >
               <button
                 type="button"
                 onClick={() => onToggleLike(drama.id, episode.number)}
@@ -1525,7 +1861,7 @@ export function TheaterPlayer({
 
           {/* Bottom Info + Isolated Progress & Full Controls */}
           <div className="absolute bottom-0 inset-x-0 z-20 px-4 pb-3.5 sm:pb-4 pt-2 space-y-2.5">
-            {hudVisible && !effectiveLandscape && !isFullscreen && (
+            {isControlsVisible && !effectiveLandscape && !isFullscreen && (
               <div className="pr-16 space-y-1">
                 <p className="text-xs text-slate-200/95 line-clamp-2 leading-relaxed">
                   {episode.hook || drama.tagline}
@@ -1550,13 +1886,13 @@ export function TheaterPlayer({
               subtitlesEnabled={subtitlesEnabled}
               subtitles={episode.subtitles}
               onSeek={handleSeek}
-              showControls={hudVisible}
+              showControls={isControlsVisible}
             />
 
             {/* Bottom Playback Control Strip (Includes Landscape & Fullscreen Controls) */}
             <div
               className={`flex items-center justify-between gap-2 pt-0.5 transition-opacity duration-200 ${
-                hudVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                isControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
               }`}
             >
               <div className="flex items-center gap-1.5">
@@ -1633,6 +1969,44 @@ export function TheaterPlayer({
               </div>
 
               <div className="flex items-center gap-1.5 relative">
+                {/* Auto-advance toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !autoAdvance;
+                    setAutoAdvance(next);
+                    onNotify(next ? '自动连播已开启' : '自动连播已关闭');
+                  }}
+                  aria-pressed={autoAdvance}
+                  aria-label="切换自动连播"
+                  className={`min-h-[40px] px-2.5 rounded-xl text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+                    autoAdvance
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40'
+                      : 'bg-white/10 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      autoAdvance ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'
+                    }`}
+                  />
+                  <span>连播</span>
+                </button>
+
+                {/* Clean mode toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCleanMode(true);
+                    onNotify('已开启清屏模式，点击右下角按钮退出');
+                  }}
+                  aria-label="清屏模式"
+                  className="min-h-[40px] px-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-medium text-slate-300 hover:text-white inline-flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                  <span className="hidden sm:inline">清屏</span>
+                </button>
+
                 {/* Episode drawer button in Landscape / Fullscreen */}
                 {(effectiveLandscape || isFullscreen) && (
                   <button
@@ -1807,7 +2181,7 @@ export function TheaterPlayer({
                 className={
                   showSideEpisodeDrawer
                     ? 'w-80 sm:w-96 max-w-[85%] h-full bg-[#14161D]/95 backdrop-blur-md border-l border-white/15 p-5 flex flex-col'
-                    : 'w-full max-w-xl max-h-[75%] rounded-t-3xl bg-[#14161D] border-t border-white/15 px-5 pt-3 pb-6 flex flex-col'
+                    : 'w-full max-w-xl max-h-[75vh] rounded-t-3xl bg-[#14161D] border-t border-white/15 px-5 pt-3 pb-6 flex flex-col shadow-2xl'
                 }
               >
                 {!showSideEpisodeDrawer && (

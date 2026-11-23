@@ -1,3 +1,8 @@
+# Hongguo unpack source (exceeds GitHub 100MB limit)
+hongguo/
+verify-player.mjs
+.chrome-verify-profile/
+
 # Logs
 logs
 *.log

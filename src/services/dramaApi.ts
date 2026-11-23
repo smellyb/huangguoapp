@@ -129,29 +129,64 @@ function deriveCategory(item: HuangguoVideoItem): DramaCategory {
   const tagsStr = (item.tags || []).join(' ');
   const title = item.title || '';
   if (
+    tagsStr.includes('魔改') ||
+    item.cate_id === 27 ||
+    item.cate_id === '27' ||
+    item.cate_name === 'AI魔改' ||
+    title.includes('魔改')
+  ) {
+    return 'AI魔改';
+  }
+  if (
+    tagsStr.includes('换脸') ||
+    item.cate_id === 26 ||
+    item.cate_id === '26' ||
+    item.cate_name === 'AI换脸' ||
+    title.includes('换脸')
+  ) {
+    return 'AI换脸';
+  }
+  if (
     tagsStr.includes('漫剧') ||
     item.cate_id === 25 ||
     item.cate_id === '25' ||
     item.cate_name === '漫剧' ||
     title.includes('漫剧')
   ) {
-    return 'AI漫剧';
+    return '漫剧';
   }
-  if (item.is_original === 1 || item.badge?.includes('原创') || item.badge === '黄果原创') {
-    return '原创短剧';
-  }
-  return 'AI短剧';
+  return '短剧';
 }
 
 function deriveGenres(item: HuangguoVideoItem): DramaGenre[] {
-  const validGenres: DramaGenre[] = ['科幻', '古风', '悬疑', '都市', '机甲', '国风'];
+  const validGenres: DramaGenre[] = [
+    '都市',
+    '古风',
+    '奇幻',
+    '现代',
+    '职场',
+    '逆袭',
+    '校园',
+    '熟女',
+    '系统',
+    '仙侠',
+    '后宫',
+    '悬疑',
+    '武侠',
+    '科幻',
+    '机甲',
+    '国风',
+  ];
   const tags = item.tags || [];
   const matched = tags.filter((t): t is DramaGenre => validGenres.includes(t as DramaGenre));
   if (matched.length > 0) return matched;
   if (tags.some((t) => t.includes('古') || t.includes('仙侠') || t.includes('武侠'))) return ['古风'];
   if (tags.some((t) => t.includes('悬疑') || t.includes('灵异') || t.includes('恐怖'))) return ['悬疑'];
-  if (tags.some((t) => t.includes('科幻') || t.includes('系统') || t.includes('脑洞') || t.includes('游戏'))) return ['科幻'];
-  if (tags.some((t) => t.includes('国风') || t.includes('武侠'))) return ['国风'];
+  if (tags.some((t) => t.includes('科幻') || t.includes('机甲'))) return ['科幻'];
+  if (tags.some((t) => t.includes('系统') || t.includes('脑洞') || t.includes('游戏'))) return ['系统'];
+  if (tags.some((t) => t.includes('逆袭') || t.includes('打脸') || t.includes('战神'))) return ['逆袭'];
+  if (tags.some((t) => t.includes('职场') || t.includes('商战'))) return ['职场'];
+  if (tags.some((t) => t.includes('现代') || t.includes('都市'))) return ['都市'];
   return ['都市'];
 }
 
@@ -446,7 +481,7 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
           id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `custom-drama-${idx + 1}`,
           title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `未命名短剧 ${idx + 1}`,
           tagline: typeof item.tagline === 'string' ? item.tagline : '精选短剧内容',
-          category: (item.category as DramaCategory) || 'AI短剧',
+          category: (item.category as DramaCategory) || '短剧',
           genres: Array.isArray(item.genres) && item.genres.length > 0 ? item.genres : ['都市'],
           posterUrl,
           heroUrl: item.heroUrl ? normalizeImageUrl(item.heroUrl) : posterUrl,
@@ -590,11 +625,11 @@ export function deriveRankings(dramas: Drama[], type: RankingType): Drama[] {
   const copy = [...dramas];
   if (type === 'comic') {
     return copy
-      .filter((d) => d.category === 'AI漫剧')
-      .concat(copy.filter((d) => d.category !== 'AI漫剧'))
+      .filter((d) => d.category === '漫剧')
+      .concat(copy.filter((d) => d.category !== '漫剧'))
       .sort((a, b) => {
-        const aComic = a.category === 'AI漫剧' ? 1 : 0;
-        const bComic = b.category === 'AI漫剧' ? 1 : 0;
+        const aComic = a.category === '漫剧' ? 1 : 0;
+        const bComic = b.category === '漫剧' ? 1 : 0;
         if (aComic !== bComic) return bComic - aComic;
         return b.heatScore - a.heatScore;
       });

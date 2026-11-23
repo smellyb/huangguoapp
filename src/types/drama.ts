@@ -1,6 +1,51 @@
-export type DramaCategory = 'AI短剧' | '原创短剧' | 'AI漫剧';
+export type DramaCategory = '短剧' | '漫剧' | 'AI换脸' | 'AI魔改';
 
-export type DramaGenre = '科幻' | '古风' | '悬疑' | '都市' | '机甲' | '国风';
+export type DramaGenre =
+  | '都市'
+  | '古风'
+  | '奇幻'
+  | '现代'
+  | '职场'
+  | '逆袭'
+  | '校园'
+  | '熟女'
+  | '系统'
+  | '仙侠'
+  | '后宫'
+  | '悬疑'
+  | '武侠'
+  | '科幻'
+  | '机甲'
+  | '国风';
+
+export interface OfficialCategory {
+  id: number;
+  name: DramaCategory;
+  route: string;
+}
+
+export const OFFICIAL_CATEGORIES: OfficialCategory[] = [
+  { id: 24, name: '短剧', route: 'ai-duanju' },
+  { id: 25, name: '漫剧', route: 'ai-manju' },
+  { id: 26, name: 'AI换脸', route: 'ai-huanlian' },
+  { id: 27, name: 'AI魔改', route: 'ai-mogai' },
+];
+
+export const POPULAR_TAGS: DramaGenre[] = [
+  '都市',
+  '古风',
+  '奇幻',
+  '现代',
+  '职场',
+  '逆袭',
+  '校园',
+  '熟女',
+  '系统',
+  '仙侠',
+  '后宫',
+  '悬疑',
+  '武侠',
+];
 
 export type RankingType = 'hot' | 'new' | 'comic';
 

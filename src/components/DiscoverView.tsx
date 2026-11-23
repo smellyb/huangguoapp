@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Bookmark,
@@ -9,7 +9,7 @@ import {
   Search,
 } from 'lucide-react';
 import { deriveRankings } from '../services/dramaApi';
-import type { Drama, RankingType, Topic } from '../types/drama';
+import { POPULAR_TAGS, type Drama, type RankingType, type Topic } from '../types/drama';
 import { DramaPoster } from './DramaPoster';
 
 interface DiscoverViewProps {
@@ -18,24 +18,21 @@ interface DiscoverViewProps {
   followedIds: string[];
   loading: boolean;
   warning?: string;
+  selectedCategory?: string;
+  onSelectCategory?: (category: string) => void;
   onPlayDrama: (drama: Drama, episodeNumber?: number) => void;
   onToggleFollow: (dramaId: string) => void;
   onOpenSearch: () => void;
   onOpenLineSelector?: () => void;
 }
 
-const FILTER_OPTIONS = [
+const FILTER_CATEGORIES = [
   '全部',
-  'AI短剧',
-  '原创短剧',
-  'AI漫剧',
-  '科幻',
-  '古风',
-  '悬疑',
-  '都市',
+  '短剧',
+  '漫剧',
+  'AI换脸',
+  'AI魔改',
 ] as const;
-
-type FilterOption = (typeof FILTER_OPTIONS)[number];
 
 export function DiscoverView({
   dramas,
@@ -43,15 +40,28 @@ export function DiscoverView({
   followedIds,
   loading,
   warning,
+  selectedCategory,
+  onSelectCategory,
   onPlayDrama,
   onToggleFollow,
   onOpenSearch,
   onOpenLineSelector,
 }: DiscoverViewProps) {
-  const [activeFilter, setActiveFilter] = useState<FilterOption>('全部');
+  const [activeFilter, setActiveFilter] = useState<string>(selectedCategory || '全部');
   const [rankingTab, setRankingTab] = useState<RankingType>('hot');
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [heroImgError, setHeroImgError] = useState(false);
+
+  useEffect(() => {
+    if (selectedCategory && selectedCategory !== activeFilter) {
+      setActiveFilter(selectedCategory);
+    }
+  }, [selectedCategory]);
+
+  const handleSelectFilter = (filter: string) => {
+    setActiveFilter(filter);
+    onSelectCategory?.(filter);
+  };
 
   const featuredDrama = useMemo(
     () => dramas.find((d) => d.isFeatured) ?? dramas[0],
@@ -69,7 +79,9 @@ export function DiscoverView({
     return dramas.filter(
       (d) =>
         d.category === activeFilter ||
-        d.genres.some((genre) => genre === activeFilter)
+        d.genres.some((genre) => genre === activeFilter) ||
+        d.tagline.includes(activeFilter) ||
+        d.synopsis.includes(activeFilter)
     );
   }, [dramas, activeFilter, selectedTopic]);
 
@@ -125,7 +137,7 @@ export function DiscoverView({
           className="flex-1 min-h-[44px] px-4 rounded-2xl bg-[#14161D] border border-white/[0.08] flex items-center gap-2.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
         >
           <Search className="w-4 h-4 text-amber-400 shrink-0" aria-hidden="true" />
-          <span className="truncate">搜索短剧、AI漫剧、题材...</span>
+          <span className="truncate">搜索短剧、漫剧、AI换脸、题材...</span>
         </button>
 
         {onOpenLineSelector && (
@@ -247,25 +259,51 @@ export function DiscoverView({
         )
       )}
 
-      {/* Interactive Category Segmented Bar */}
+      {/* Interactive Category Segmented Bar & Popular Tags */}
       {!selectedTopic && (
         <section aria-label="题材与频道筛选" className="space-y-4">
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-            {FILTER_OPTIONS.map((option) => {
+            {FILTER_CATEGORIES.map((option) => {
               const active = activeFilter === option;
               return (
                 <button
                   key={option}
                   type="button"
-                  onClick={() => setActiveFilter(option)}
+                  onClick={() => handleSelectFilter(option)}
                   aria-pressed={active}
                   className={`min-h-[40px] px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
                     active
-                      ? 'bg-amber-500 text-[#0B0C10] font-semibold'
+                      ? 'bg-amber-500 text-[#0B0C10] font-semibold shadow-md shadow-amber-500/10'
                       : 'bg-[#14161D] text-slate-300 border border-white/[0.08] hover:text-white hover:border-white/20'
                   }`}
                 >
                   {option}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Official Popular Tags Bar (Synced with huangguoai.com) */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-1">
+            <span className="text-xs font-semibold text-slate-400 shrink-0 flex items-center gap-1 pr-1">
+              <Flame className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+              热门标签:
+            </span>
+            {POPULAR_TAGS.map((tag) => {
+              const active = activeFilter === tag;
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => handleSelectFilter(tag)}
+                  aria-pressed={active}
+                  className={`min-h-[30px] px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
+                    active
+                      ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40 font-semibold'
+                      : 'bg-white/[0.04] text-slate-400 border border-white/[0.06] hover:text-slate-200 hover:border-white/15'
+                  }`}
+                >
+                  {tag}
                 </button>
               );
             })}
@@ -292,7 +330,7 @@ export function DiscoverView({
           {!selectedTopic && activeFilter !== '全部' && (
             <button
               type="button"
-              onClick={() => setActiveFilter('全部')}
+              onClick={() => handleSelectFilter('全部')}
               className="min-h-[44px] text-xs sm:text-sm font-medium text-amber-400 hover:text-amber-300 transition-colors whitespace-nowrap shrink-0"
             >
               查看全部
@@ -307,7 +345,7 @@ export function DiscoverView({
             </p>
             <button
               type="button"
-              onClick={() => setActiveFilter('全部')}
+              onClick={() => handleSelectFilter('全部')}
               className="min-h-[44px] px-5 py-2 rounded-xl bg-amber-500 text-[#0B0C10] text-sm font-semibold hover:bg-amber-400 transition-colors"
             >
               重置筛选

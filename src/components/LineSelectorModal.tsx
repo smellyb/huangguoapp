@@ -8,7 +8,6 @@ import {
   Globe,
   Plus,
   RefreshCw,
-  Server,
   ShieldCheck,
   Trash2,
   Wifi,

@@ -9,7 +9,6 @@ import {
   Globe,
   Play,
   PlugZap,
-  Radio,
   Server,
   ShieldCheck,
   Trash2,
@@ -23,7 +22,6 @@ import {
   testCustomApiEndpoint,
 } from '../services/dramaApi';
 import {
-  DEFAULT_PERMANENT_DOMAINS,
   DEFAULT_SPEED_LINES,
   OFFICIAL_CHANNELS,
   OFFICIAL_SUPPORT_EMAIL,
@@ -52,7 +50,7 @@ const API_SCHEMA_SNIPPET = `GET {baseUrl}/dramas
   {
     "id": "my-drama-01",
     "title": "剧集名称",
-    "category": "AI短剧",
+    "category": "短剧",
     "genres": ["科幻", "悬疑"],
     "posterUrl": "https://cdn.example.com/poster.jpg",
     "status": "连载中",

@@ -149,7 +149,13 @@ async function openSession(baseUrl: string, scope: 'playback' | 'user' | 'public
     throw new Error('加密握手响应格式无效');
   }
 
-  const serverPub = await subtle.importKey('raw', decode64(hello.server_pub, true), ecdh, false, []);
+  const serverPub = await subtle.importKey(
+    'raw',
+    decode64(hello.server_pub, true) as unknown as BufferSource,
+    ecdh,
+    false,
+    []
+  );
   const shared = await subtle.deriveBits({ name: 'ECDH', public: serverPub }, pair.privateKey, 256);
   const hkdf = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
   const salt = decode64(hello.salt, true);
@@ -161,8 +167,8 @@ async function openSession(baseUrl: string, scope: 'playback' | 'user' | 'public
       {
         name: 'HKDF',
         hash: 'SHA-256',
-        salt,
-        info: encoder.encode(`${info}\n${direction}`),
+        salt: salt as unknown as BufferSource,
+        info: encoder.encode(`${info}\n${direction}`) as unknown as BufferSource,
       },
       hkdf,
       { name: 'AES-GCM', length: 256 },
@@ -252,8 +258,8 @@ export async function callEncryptedApi<T = unknown>(
 
   const params: AesGcmParams = {
     name: 'AES-GCM',
-    iv,
-    additionalData: encoder.encode([session.info, 'req', sequence, timestamp].join('\n')),
+    iv: iv as unknown as BufferSource,
+    additionalData: encoder.encode([session.info, 'req', sequence, timestamp].join('\n')) as unknown as BufferSource,
   };
 
   const innerReq = {
@@ -267,7 +273,7 @@ export async function callEncryptedApi<T = unknown>(
   const encrypted = await subtle.encrypt(
     params,
     session.requestKey,
-    encoder.encode(JSON.stringify(packet))
+    encoder.encode(JSON.stringify(packet)) as unknown as BufferSource
   );
 
   const endpoint = `${session.baseUrl}/api/${scope}/request`;
@@ -309,14 +315,14 @@ export async function callEncryptedApi<T = unknown>(
 
   const resParams: AesGcmParams = {
     name: 'AES-GCM',
-    iv,
-    additionalData: encoder.encode([session.info, 'res', sequence, timestamp].join('\n')),
+    iv: iv as unknown as BufferSource,
+    additionalData: encoder.encode([session.info, 'res', sequence, timestamp].join('\n')) as unknown as BufferSource,
   };
 
   const plaintext = await subtle.decrypt(
     resParams,
     session.responseKey,
-    decode64(result.ciphertext, true)
+    decode64(result.ciphertext, true) as unknown as BufferSource
   );
 
   const inner = JSON.parse(decoder.decode(plaintext)) as {

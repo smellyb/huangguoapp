@@ -34,7 +34,7 @@ import {
   X,
 } from 'lucide-react';
 import { episodeLikeKey } from '../hooks/useUserLibrary';
-import { cleanCoverUrl, fetchEpisodePlayback, fetchEpisodeStreamUrl, getFallbackPoster } from '../services/dramaApi';
+import { cleanCoverUrl, fetchEpisodePlayback, getFallbackPoster } from '../services/dramaApi';
 import {
   cancelPendingPreloads,
   isEpisodeWarmed,

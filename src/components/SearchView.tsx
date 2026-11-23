@@ -120,7 +120,7 @@ export function SearchView({
       <div className="space-y-2">
         <h1 className="text-2xl sm:text-3xl font-bold text-white">站内搜索</h1>
         <p className="text-sm text-slate-400">
-          按剧名、题材、AI漫剧分类或出品工坊即时检索黄果短剧库
+          按剧名、题材、短剧/漫剧分类或出品工坊即时检索黄果短剧库
         </p>
       </div>
 
@@ -134,7 +134,7 @@ export function SearchView({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="输入剧名、关键词（如：高三、神瞳、少妇、锁情咒、AI漫剧）..."
+          placeholder="输入剧名、关键词（如：高三、神瞳、少妇、锁情咒、漫剧、AI换脸）..."
           aria-label="搜索短剧"
           className="w-full min-h-[52px] pl-12 pr-28 rounded-2xl bg-[#14161D] border border-white/10 text-sm sm:text-base text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
         />

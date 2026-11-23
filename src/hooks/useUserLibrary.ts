@@ -19,7 +19,7 @@ const DEFAULT_STATE: UserLibraryState = {
       updatedAt: Date.now() - 1000 * 60 * 18,
     },
   ],
-  searchHistory: ['时序折叠', 'AI漫剧'],
+  searchHistory: ['时序折叠', '漫剧'],
   apiConfig: {
     mode: envApiBase ? 'custom' : 'demo',
     baseUrl: envApiBase,

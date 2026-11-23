@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Clapperboard, Compass, Play, Search, User, Wifi, Zap } from 'lucide-react';
+import { Clapperboard, Compass, Play, Search, User } from 'lucide-react';
 import { DiscoverView } from './components/DiscoverView';
 import { LineSelectorModal } from './components/LineSelectorModal';
 import { ProfileView } from './components/ProfileView';
@@ -11,8 +11,26 @@ import { fetchDramaDetail, loadDramaCatalog } from './services/dramaApi';
 import { DEFAULT_PERMANENT_DOMAINS, DEFAULT_SPEED_LINES } from './services/publishLines';
 import type { AppTab, Drama, Topic } from './types/drama';
 
-const NAV_ITEMS: { id: AppTab; label: string; icon: typeof Compass }[] = [
-  { id: 'discover', label: '发现', icon: Compass },
+interface DesktopNavItem {
+  id: string;
+  label: string;
+  tab: AppTab;
+  category?: string;
+}
+
+const DESKTOP_NAV_ITEMS: DesktopNavItem[] = [
+  { id: 'nav-home', label: '首页', tab: 'discover', category: '全部' },
+  { id: 'nav-duanju', label: '短剧', tab: 'discover', category: '短剧' },
+  { id: 'nav-manju', label: '漫剧', tab: 'discover', category: '漫剧' },
+  { id: 'nav-huanlian', label: 'AI换脸', tab: 'discover', category: 'AI换脸' },
+  { id: 'nav-mogai', label: 'AI魔改', tab: 'discover', category: 'AI魔改' },
+  { id: 'nav-theater', label: '剧场', tab: 'theater' },
+  { id: 'nav-search', label: '搜索', tab: 'search' },
+  { id: 'nav-profile', label: '我的', tab: 'profile' },
+];
+
+const MOBILE_NAV_ITEMS: { id: AppTab; label: string; icon: typeof Compass }[] = [
+  { id: 'discover', label: '首页', icon: Compass },
   { id: 'theater', label: '剧场', icon: Clapperboard },
   { id: 'search', label: '搜索', icon: Search },
   { id: 'profile', label: '我的', icon: User },
@@ -33,6 +51,7 @@ export default function App() {
   } = useUserLibrary();
 
   const [activeTab, setActiveTab] = useState<AppTab>('discover');
+  const [selectedCategory, setSelectedCategory] = useState<string>('全部');
   const [dramas, setDramas] = useState<Drama[]>(DEMO_DRAMAS);
   const [topics, setTopics] = useState<Topic[]>(DEMO_TOPICS);
   const [dataSource, setDataSource] = useState<'demo' | 'custom'>('demo');
@@ -199,7 +218,11 @@ export default function App() {
         <div className="max-w-7xl mx-auto h-full px-6 lg:px-8 flex items-center justify-between gap-8">
           <button
             type="button"
-            onClick={() => setActiveTab('discover')}
+            onClick={() => {
+              setActiveTab('discover');
+              setSelectedCategory('全部');
+              window.scrollTo({ top: 0 });
+            }}
             className="font-display text-lg font-bold tracking-tight text-white hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded-sm"
           >
             黄果短剧
@@ -207,16 +230,21 @@ export default function App() {
 
           <nav
             aria-label="主导航"
-            className="flex items-center gap-8 text-sm font-medium"
+            className="flex items-center gap-5 lg:gap-7 text-sm font-medium"
           >
-            {NAV_ITEMS.map((item) => {
-              const active = activeTab === item.id;
+            {DESKTOP_NAV_ITEMS.map((item) => {
+              const active =
+                activeTab === item.tab &&
+                (item.tab !== 'discover' || (selectedCategory || '全部') === (item.category || '全部'));
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    setActiveTab(item.id);
+                    setActiveTab(item.tab);
+                    if (item.category) {
+                      setSelectedCategory(item.category);
+                    }
                     window.scrollTo({ top: 0 });
                   }}
                   className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
@@ -267,7 +295,10 @@ export default function App() {
         <header className="md:hidden sticky top-0 z-30 h-[52px] px-4 bg-[#0B0C10]/90 backdrop-blur-md border-b border-white/[0.08] flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => setActiveTab('discover')}
+            onClick={() => {
+              setActiveTab('discover');
+              setSelectedCategory('全部');
+            }}
             className="font-display text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0"
           >
             黄果短剧
@@ -309,6 +340,8 @@ export default function App() {
             followedIds={state.followedIds}
             loading={catalogLoading}
             warning={catalogWarning}
+            selectedCategory={selectedCategory}
+            onSelectCategory={setSelectedCategory}
             onPlayDrama={(drama, ep) => openTheater(drama, ep)}
             onToggleFollow={handleToggleFollow}
             onOpenSearch={() => setActiveTab('search')}
@@ -373,7 +406,7 @@ export default function App() {
             <span className="font-display font-semibold text-slate-300">
               黄果短剧
             </span>
-            <span>AI短剧 · 原创短剧 · AI漫剧 · 支持自定义片源 API 接入</span>
+            <span>短剧 · 漫剧 · AI换脸 · AI魔改 · 支持自定义片源 API 接入</span>
           </div>
         </footer>
       )}
@@ -384,7 +417,7 @@ export default function App() {
         className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0B0C10]/95 backdrop-blur-md border-t border-white/[0.08] pb-safe"
       >
         <div className="grid grid-cols-4 h-16 items-center">
-          {NAV_ITEMS.map((item) => {
+          {MOBILE_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
             return (
@@ -426,7 +459,7 @@ export default function App() {
         isOpen={isLineModalOpen}
         onClose={() => setIsLineModalOpen(false)}
         currentBaseUrl={state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : ''}
-        onSelectLine={(url, name) => {
+        onSelectLine={(url) => {
           if (!url) {
             updateApiConfig({ mode: 'demo', baseUrl: '' });
           } else {

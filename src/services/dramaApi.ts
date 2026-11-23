@@ -1,5 +1,6 @@
 import { DEMO_DRAMAS, DEMO_TOPICS } from '../data/demoCatalog';
-import type { ApiConfig, Drama, DramaCategory, DramaGenre, Episode, RankingType, Topic } from '../types/drama';
+import type { ApiConfig, CdnAuthConfig, Drama, DramaCategory, DramaGenre, Episode, RankingType, Topic } from '../types/drama';
+import { resolveEncryptedPlayback } from './edgeApiCrypto';
 
 const REQUEST_TIMEOUT_MS = 10000;
 export const DEFAULT_IMAGE_CDN = 'https://pic.qnlycc.cn';
@@ -218,14 +219,41 @@ export function transformHuangguoItemToDrama(item: HuangguoVideoItem, index: num
   };
 }
 
-export async function fetchEpisodeStreamUrl(
+export interface EpisodePlaybackInfo {
+  streamUrl: string;
+  hevcUrl?: string;
+  previewUrl?: string;
+  cdn?: CdnAuthConfig;
+  timestamp?: number;
+}
+
+export async function fetchEpisodePlayback(
   baseUrl: string,
   dramaId: string,
   episodeNumber: number
-): Promise<string | undefined> {
+): Promise<EpisodePlaybackInfo | undefined> {
   const base = normalizeBaseUrl(baseUrl);
+
+  // 1. 优先尝试官方边缘加密通信协议 (dx150-edge-v1 ECDH P-256 + HKDF + AES-GCM)
+  try {
+    const encryptedResult = await resolveEncryptedPlayback(base, dramaId, episodeNumber);
+    if (encryptedResult?.streamUrl) {
+      return {
+        streamUrl: encryptedResult.streamUrl,
+        hevcUrl: encryptedResult.hevcUrl,
+        previewUrl: encryptedResult.previewUrl,
+        cdn: encryptedResult.cdn,
+        timestamp: encryptedResult.timestamp,
+      };
+    }
+  } catch (err) {
+    console.warn(`[dramaApi] Encrypted edge playback resolution failed for drama ${dramaId} ep ${episodeNumber}:`, err);
+  }
+
+  // 2. 备用平坦/直接线路尝试 (针对未启用边缘加密的镜像或反向代理)
   const endpoint = `${base}/api/videos/${encodeURIComponent(dramaId)}/episodes/${episodeNumber}/playback`;
   const fallbackEndpoint = `${base}/api/videos/${encodeURIComponent(dramaId)}/playback`;
+  const playGetEndpoint = `${base}/api/videos/${encodeURIComponent(dramaId)}/play?ep=${episodeNumber}`;
 
   try {
     const res = await fetch(endpoint, {
@@ -244,10 +272,20 @@ export async function fetchEpisodeStreamUrl(
             hevc?: string;
             preview?: string;
           };
+          cdn?: CdnAuthConfig;
+          timestamp?: number;
         };
       };
       const stream = payload?.data?.streams?.main || payload?.data?.streams?.preview || payload?.data?.streams?.hevc;
-      if (stream) return stream;
+      if (stream) {
+        return {
+          streamUrl: stream,
+          hevcUrl: payload.data?.streams?.hevc,
+          previewUrl: payload.data?.streams?.preview,
+          cdn: payload.data?.cdn,
+          timestamp: payload.data?.timestamp,
+        };
+      }
     }
 
     const fallbackRes = await fetch(fallbackEndpoint, {
@@ -265,14 +303,56 @@ export async function fetchEpisodeStreamUrl(
             hevc?: string;
             preview?: string;
           };
+          cdn?: CdnAuthConfig;
+          timestamp?: number;
         };
       };
-      return payload?.data?.streams?.main || payload?.data?.streams?.preview || payload?.data?.streams?.hevc;
+      const stream = payload?.data?.streams?.main || payload?.data?.streams?.preview || payload?.data?.streams?.hevc;
+      if (stream) {
+        return {
+          streamUrl: stream,
+          hevcUrl: payload.data?.streams?.hevc,
+          previewUrl: payload.data?.streams?.preview,
+          cdn: payload.data?.cdn,
+          timestamp: payload.data?.timestamp,
+        };
+      }
+    }
+
+    // 3. 尝试公开 GET /api/videos/:id/play?ep=:ep
+    const playRes = await fetch(playGetEndpoint, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (playRes.ok) {
+      const playPayload = (await playRes.json()) as {
+        status?: number;
+        data?: {
+          video_url?: string;
+          video_url_hevc?: string;
+        };
+      };
+      if (playPayload?.status === 1 && playPayload.data?.video_url) {
+        return {
+          streamUrl: playPayload.data.video_url,
+          hevcUrl: playPayload.data.video_url_hevc,
+        };
+      }
     }
   } catch (err) {
-    console.warn(`[dramaApi] Failed to fetch playback for drama ${dramaId} ep ${episodeNumber}:`, err);
+    console.warn(`[dramaApi] Failed direct playback resolution for drama ${dramaId} ep ${episodeNumber}:`, err);
   }
+
   return undefined;
+}
+
+export async function fetchEpisodeStreamUrl(
+  baseUrl: string,
+  dramaId: string,
+  episodeNumber: number
+): Promise<string | undefined> {
+  const info = await fetchEpisodePlayback(baseUrl, dramaId, episodeNumber);
+  return info?.streamUrl;
 }
 
 export async function fetchDramaDetail(

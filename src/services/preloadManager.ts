@@ -39,10 +39,19 @@ export function preloadNextEpisode(dramaId: string, nextEpisode: Episode | undef
     const controller = new AbortController();
     activeControllers.set(key, controller);
 
+    const headers: Record<string, string> = {};
+    if (nextEpisode.cdn?.authKey && nextEpisode.cdn.authValue) {
+      headers[nextEpisode.cdn.authKey] = nextEpisode.cdn.authValue;
+    }
+    if (nextEpisode.cdn?.app) {
+      headers['x-cdn-app'] = nextEpisode.cdn.app;
+    }
+
     fetch(nextEpisode.hlsUrl, {
       method: 'GET',
       cache: 'force-cache',
       signal: controller.signal,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
     })
       .then(async (res) => {
         if (!res.ok) return;

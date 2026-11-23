@@ -1,21 +1,25 @@
-import { useEffect, useMemo, useState, type MutableRefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import {
   ArrowLeft,
   ChevronRight,
   Clock,
   Flame,
   Play,
+  Search,
   SlidersHorizontal,
+  Tag,
   X,
 } from 'lucide-react';
-import { deriveRankings } from '../services/dramaApi';
+import { deriveRankings, fetchOfficialTags } from '../services/dramaApi';
 import {
   POPULAR_TAGS,
   type Drama,
+  type OfficialTagCategory,
   type RankingType,
   type Topic,
   type WatchHistoryEntry,
 } from '../types/drama';
+import OFFICIAL_TAGS_DATA from '../data/officialTags.json';
 import { DramaCoverImage, DramaPoster } from './DramaPoster';
 
 interface DiscoverViewProps {
@@ -72,6 +76,21 @@ export function DiscoverView({
   const [rankingTab, setRankingTab] = useState<RankingType>('hot');
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [showGenreSheet, setShowGenreSheet] = useState(false);
+  const [channelSubFilter, setChannelSubFilter] = useState<'latest' | 'hot' | 'recommended' | 'all' | 'manju' | 'duanju'>('latest');
+
+  // Official 9-Category Tags from huangguoai.com
+  const [tagCategories, setTagCategories] = useState<OfficialTagCategory[]>(() => OFFICIAL_TAGS_DATA as OfficialTagCategory[]);
+  const [activeTagCategoryCode, setActiveTagCategoryCode] = useState<string>('all');
+  const [tagSearchQuery, setTagSearchQuery] = useState('');
+  const tagScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetchOfficialTags().then((cats) => {
+      if (Array.isArray(cats) && cats.length > 0) {
+        setTagCategories(cats);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (!overlayBackHandlerRef) return;
@@ -136,41 +155,65 @@ export function DiscoverView({
       activeChannel !== '专题'
     ) {
       if (activeChannel === '黄果原创') {
-        const originals = list.filter(
+        let originals = list.filter(
           (d) =>
             d.isFeatured ||
             d.studio.includes('黄果') ||
-            d.category === '短剧'
+            d.category === '短剧' ||
+            d.category === '漫剧'
         );
+        if (channelSubFilter === 'manju') {
+          originals = originals.filter((d) => d.category === '漫剧');
+        } else if (channelSubFilter === 'duanju') {
+          originals = originals.filter((d) => d.category === '短剧');
+        }
         list = originals.length > 0 ? originals : list;
+      } else if (activeChannel === '短剧') {
+        list = list.filter((d) => d.category === '短剧' || d.category === '全部');
+        if (channelSubFilter === 'recommended') {
+          list = list.filter((d) => Boolean(d.isFeatured || (d.rating && d.rating >= 9.5)));
+        }
+      } else if (activeChannel === '漫剧') {
+        list = list.filter((d) => d.category === '漫剧');
+        if (channelSubFilter === 'recommended') {
+          list = list.filter((d) => Boolean(d.isFeatured || (d.rating && d.rating >= 9.5)));
+        }
       } else {
         list = list.filter(
           (d) =>
             d.category === activeChannel ||
-            d.genres.some((genre) => genre === activeChannel) ||
+            d.genres.some((genre) => genre.toLowerCase() === activeChannel.toLowerCase()) ||
+            d.title.includes(activeChannel) ||
             d.tagline.includes(activeChannel)
         );
       }
     }
 
     if (selectedGenre !== '全部') {
+      const target = selectedGenre.toLowerCase();
       list = list.filter(
         (d) =>
-          d.genres.some((genre) => genre === selectedGenre) ||
-          d.category === selectedGenre ||
-          d.tagline.includes(selectedGenre) ||
-          d.synopsis.includes(selectedGenre)
+          d.genres.some((genre) => genre.toLowerCase() === target) ||
+          d.category.toLowerCase() === target ||
+          d.title.toLowerCase().includes(target) ||
+          d.tagline.toLowerCase().includes(target) ||
+          d.synopsis.toLowerCase().includes(target)
       );
     }
 
     return list;
-  }, [dramas, activeChannel, selectedGenre, selectedTopic]);
+  }, [dramas, activeChannel, channelSubFilter, selectedGenre, selectedTopic]);
 
   const sortedDramas = useMemo(() => {
     const list = [...filteredDramas];
-    if (sortMode === 'hot') {
+    const effectiveSort =
+      activeChannel !== '全部' && (channelSubFilter === 'hot' || channelSubFilter === 'recommended' || channelSubFilter === 'latest')
+        ? channelSubFilter
+        : sortMode;
+
+    if (effectiveSort === 'hot') {
       list.sort((a, b) => b.heatScore - a.heatScore);
-    } else if (sortMode === 'recommended') {
+    } else if (effectiveSort === 'recommended') {
       list.sort((a, b) => {
         if (a.isFeatured && !b.isFeatured) return -1;
         if (!a.isFeatured && b.isFeatured) return 1;
@@ -178,7 +221,7 @@ export function DiscoverView({
       });
     }
     return list;
-  }, [filteredDramas, sortMode]);
+  }, [filteredDramas, sortMode, activeChannel, channelSubFilter]);
 
   const rankedDramas = useMemo(
     () => deriveRankings(dramas, rankingTab).slice(0, 10),
@@ -344,29 +387,86 @@ export function DiscoverView({
         </section>
       )}
 
-      {/* Sort & Genre Filter Toolbar (shown on drama feed views) */}
+      {/* Channel Header (Matches huangguoai.com channel page subheaders) */}
+      {!selectedTopic && (activeChannel === '短剧' || activeChannel === '漫剧' || activeChannel === '黄果原创') && (
+        <section className="space-y-3 pt-1 pb-2 border-b border-white/[0.08]">
+          <div className="text-xs text-slate-400 font-medium">
+            <span className="text-slate-500">首页</span> /{' '}
+            <span className="text-amber-400">
+              {activeChannel === '短剧'
+                ? 'AI成人短剧'
+                : activeChannel === '漫剧'
+                ? 'AI成人漫剧'
+                : '黄果原创'}
+            </span>
+          </div>
+
+          <div className="space-y-1">
+            <h1 className="text-base sm:text-xl font-bold text-white leading-snug">
+              {activeChannel === '短剧' && 'AI成人短剧'}
+              {activeChannel === '漫剧' && 'AI成人漫剧'}
+              {activeChannel === '黄果原创' && '黄果独家原创'}
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400">
+              {activeChannel === '短剧' && '精选热播短剧，汇集独家原创、精选推荐与最新更新内容。'}
+              {activeChannel === '漫剧' && '精选热播漫剧，汇集独家原创、精选推荐与最新更新内容。'}
+              {activeChannel === '黄果原创' && '黄果自研高画质短剧与漫剧在线观看。'}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1 overflow-x-auto no-scrollbar">
+            {(activeChannel === '黄果原创'
+              ? [
+                  { id: 'all', label: '全部原创' },
+                  { id: 'manju', label: '原创漫剧' },
+                  { id: 'duanju', label: '原创短剧' },
+                ]
+              : [
+                  { id: 'latest', label: '最近更新' },
+                  { id: 'hot', label: '当前热播' },
+                  { id: 'recommended', label: '精选推荐' },
+                ]
+            ).map((p) => {
+              const active = channelSubFilter === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setChannelSubFilter(p.id as any)}
+                  className={`min-h-[34px] px-3.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                    active
+                      ? 'bg-amber-400 text-[#0B0C10] shadow-md shadow-amber-500/20'
+                      : 'bg-[#14161D] border border-white/[0.08] text-slate-300 hover:text-white hover:bg-[#1D202A]'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Official Popular Tags Row & Filter Bar (huangguoai.com 热门标签完全对齐) */}
       {!selectedTopic && !isRankingOnlyView && !isTopicsOnlyView && (
-        <section aria-label="排序与题材筛选" className="space-y-3">
+        <section aria-label="热门标签与题材筛选" className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            {/* Compact Sort Segmented Control */}
-            <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#14161D] border border-white/[0.08]">
-              {SORT_OPTIONS.map((opt) => {
-                const active = sortMode === opt.key;
-                return (
+            <div className="flex items-center gap-2">
+              <span className="w-1 h-3.5 rounded-full bg-amber-400" />
+              <h2 className="text-sm font-bold text-white tracking-wide">热门标签</h2>
+              {selectedGenre !== '全部' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-400/15 text-amber-300 border border-amber-400/30">
+                  当前：{selectedGenre}
                   <button
-                    key={opt.key}
                     type="button"
-                    onClick={() => setSortMode(opt.key)}
-                    className={`min-h-[34px] px-3 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                      active
-                        ? 'bg-amber-500 text-[#0B0C10]'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
+                    onClick={() => setSelectedGenre('全部')}
+                    aria-label="清除筛选"
+                    className="hover:text-white ml-0.5"
                   >
-                    {opt.label}
+                    <X className="w-3 h-3" />
                   </button>
-                );
-              })}
+                </span>
+              )}
             </div>
 
             {/* All Genres Sheet Trigger */}
@@ -376,36 +476,89 @@ export function DiscoverView({
                 setShowGenreSheet(true);
                 onPushHistoryLayer?.('genre-sheet');
               }}
-              className={`min-h-[40px] px-3 rounded-xl border text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 active:scale-95 ${
+              className={`min-h-[36px] px-3 rounded-xl border text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 active:scale-95 ${
                 selectedGenre !== '全部'
                   ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
                   : 'bg-[#14161D] border-white/[0.08] text-slate-300 hover:text-white'
               }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{selectedGenre !== '全部' ? `题材：${selectedGenre}` : '筛选题材'}</span>
+              <span>全部分类标签 (9大类)</span>
             </button>
           </div>
 
-          {/* Fast Horizontal Genre Strip */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-3.5 px-3.5 sm:mx-0 sm:px-0">
-            {POPULAR_TAGS.slice(0, 12).map((tag) => {
-              const active = selectedGenre === tag;
-              return (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => setSelectedGenre(tag)}
-                  className={`min-h-[34px] px-3 rounded-lg text-xs transition-colors whitespace-nowrap shrink-0 ${
-                    active
-                      ? 'bg-white text-[#0B0C10] font-semibold'
-                      : 'bg-[#14161D] text-slate-300 hover:text-white hover:bg-[#1D202A]'
-                  }`}
-                >
-                  {tag}
-                </button>
-              );
-            })}
+          {/* 20 Official Popular Tags Strip */}
+          <div className="relative group">
+            <div
+              ref={tagScrollRef}
+              className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth -mx-3.5 px-3.5 sm:mx-0 sm:px-0 py-1"
+            >
+              {POPULAR_TAGS.map((tag) => {
+                const active = selectedGenre === tag;
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSelectedGenre(tag)}
+                    className={`min-h-[34px] px-3.5 rounded-lg text-xs font-medium whitespace-nowrap shrink-0 transition-all ${
+                      active
+                        ? 'bg-amber-400 text-[#0B0C10] font-bold shadow-md shadow-amber-500/20'
+                        : 'bg-[#14161D] border border-white/[0.06] text-slate-300 hover:text-white hover:bg-[#1D202A]'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Section Heading & Sort Bar */}
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center gap-2">
+              <span className="w-1 h-3.5 rounded-full bg-amber-400" />
+              <h2 className="text-sm sm:text-base font-bold text-white">
+                {activeChannel === '短剧'
+                  ? channelSubFilter === 'hot'
+                    ? '当前热播的AI成人短剧'
+                    : channelSubFilter === 'recommended'
+                    ? '精选推荐的AI成人短剧'
+                    : '最新更新的AI成人短剧'
+                  : activeChannel === '漫剧'
+                  ? channelSubFilter === 'hot'
+                    ? '当前热播的AI成人漫剧'
+                    : channelSubFilter === 'recommended'
+                    ? '精选推荐的AI成人漫剧'
+                    : '最新更新的AI成人漫剧'
+                  : activeChannel === '黄果原创'
+                  ? '精选独家原创短剧与漫剧'
+                  : selectedGenre !== '全部'
+                  ? `【${selectedGenre}】题材短剧`
+                  : '最新更新短剧'}
+              </h2>
+              <span className="text-xs text-slate-500 font-mono">共 {sortedDramas.length} 部</span>
+            </div>
+
+            {/* Compact Sort Segmented Control */}
+            <div className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-[#14161D] border border-white/[0.08]">
+              {SORT_OPTIONS.map((opt) => {
+                const active = sortMode === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setSortMode(opt.key)}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                      active
+                        ? 'bg-amber-500 text-[#0B0C10]'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
@@ -592,56 +745,245 @@ export function DiscoverView({
         </section>
       )}
 
-      {/* All Genres Bottom Sheet (Thumb-friendly genre picker) */}
+      {/* Official 9-Category Tags Bottom Sheet (huangguoai.com 全维度官方题材分类抽屉) */}
       {showGenreSheet && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="选择题材"
+          aria-label="选择题材与分类标签"
           onClick={() => setShowGenreSheet(false)}
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="animate-sheet-up w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-[#14161D] border-t sm:border border-white/10 p-5 pb-[calc(env(safe-area-inset-bottom,0px)+20px)] space-y-4 shadow-2xl"
+            className="animate-sheet-up w-full sm:max-w-xl max-h-[85vh] rounded-t-3xl sm:rounded-3xl bg-[#14161D] border-t sm:border border-white/10 p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom,0px)+16px)] flex flex-col gap-3 shadow-2xl overflow-hidden"
           >
-            <div className="sm:hidden flex justify-center -mt-2 mb-1">
+            {/* Sheet Handle */}
+            <div className="sm:hidden flex justify-center -mt-1 mb-0.5">
               <div className="w-10 h-1 rounded-full bg-white/20" />
             </div>
 
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">选择剧集题材</h3>
+            {/* Header */}
+            <div className="flex items-center justify-between pb-1">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-amber-400" aria-hidden="true" />
+                <h3 className="text-base font-bold text-white">选择分类题材与标签</h3>
+                <span className="text-xs text-slate-500 font-mono">
+                  (9大分类 · {tagCategories.reduce((acc, c) => acc + c.tags.length, 0)}+ 标签)
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowGenreSheet(false)}
-                aria-label="关闭题材筛选"
-                className="min-h-[44px] min-w-[44px] -mr-2 flex items-center justify-center rounded-xl text-slate-400 hover:text-white"
+                aria-label="关闭标签筛选"
+                className="min-h-[40px] min-w-[40px] -mr-1 flex items-center justify-center rounded-xl text-slate-400 hover:text-white"
               >
                 <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 
-            <div className="grid grid-cols-4 gap-2 max-h-[55dvh] overflow-y-auto no-scrollbar">
-              {POPULAR_TAGS.map((tag) => {
-                const active = selectedGenre === tag;
-                return (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => {
-                      setSelectedGenre(tag);
-                      setShowGenreSheet(false);
-                    }}
-                    className={`min-h-[42px] px-2 rounded-xl text-xs font-medium transition-colors truncate ${
-                      active
-                        ? 'bg-amber-500 text-[#0B0C10] font-bold'
-                        : 'bg-[#1D202A] text-slate-200 hover:bg-white/10'
-                    }`}
-                  >
-                    {tag}
-                  </button>
-                );
-              })}
+            {/* Search Input for fast tag lookup */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="搜索任意标签，如：人妻、绿帽、熟女、系统、母子..."
+                value={tagSearchQuery}
+                onChange={(e) => setTagSearchQuery(e.target.value)}
+                className="w-full bg-[#1D202A] border border-white/10 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400/60"
+              />
+              {tagSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setTagSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Official 9 Categories Tab Pills */}
+            {!tagSearchQuery && (
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveTagCategoryCode('all')}
+                  className={`min-h-[30px] px-3 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                    activeTagCategoryCode === 'all'
+                      ? 'bg-amber-400 text-black shadow'
+                      : 'bg-[#1D202A] text-slate-400 hover:text-white'
+                  }`}
+                >
+                  热门推荐 (20)
+                </button>
+                {tagCategories.map((cat) => {
+                  const active = activeTagCategoryCode === cat.code;
+                  return (
+                    <button
+                      key={cat.code}
+                      type="button"
+                      onClick={() => setActiveTagCategoryCode(cat.code)}
+                      className={`min-h-[30px] px-3 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                        active
+                          ? 'bg-amber-400 text-black shadow'
+                          : 'bg-[#1D202A] text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {cat.name} ({cat.tags.length})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Tags Grid */}
+            <div className="flex-1 overflow-y-auto min-h-[220px] max-h-[46vh] no-scrollbar pr-1 space-y-4">
+              {tagSearchQuery.trim() ? (
+                // Filtered tags by user search query
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-400">
+                    搜索 “{tagSearchQuery}” 匹配到的官方标签：
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {tagCategories
+                      .flatMap((c) => c.tags)
+                      .filter((t) => t.name.includes(tagSearchQuery.trim()))
+                      .map((t) => {
+                        const active = selectedGenre === t.name;
+                        return (
+                          <button
+                            key={`${t.id}-${t.name}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedGenre(t.name);
+                              setShowGenreSheet(false);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                              active
+                                ? 'bg-amber-400 text-black font-bold shadow'
+                                : 'bg-[#1D202A] text-slate-200 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            {t.name}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              ) : activeTagCategoryCode === 'all' ? (
+                // Popular Top 20 Tags
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span>黄果短剧官方首页核心推荐题材</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedGenre('全部');
+                        setShowGenreSheet(false);
+                      }}
+                      className="text-amber-400 hover:text-amber-300 font-medium"
+                    >
+                      重置为全部
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                    {POPULAR_TAGS.map((tag) => {
+                      const active = selectedGenre === tag;
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => {
+                            setSelectedGenre(tag);
+                            setShowGenreSheet(false);
+                          }}
+                          className={`min-h-[40px] px-2 rounded-xl text-xs font-medium transition-colors truncate flex items-center justify-center gap-1 ${
+                            active
+                              ? 'bg-amber-400 text-[#0B0C10] font-bold shadow'
+                              : 'bg-[#1D202A] text-slate-200 hover:bg-white/10'
+                          }`}
+                        >
+                          <span>{tag}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                // Category Specific Tags
+                <div className="space-y-2">
+                  {tagCategories
+                    .filter((c) => c.code === activeTagCategoryCode)
+                    .map((cat) => (
+                      <div key={cat.code} className="space-y-2.5">
+                        <div className="flex items-center justify-between text-xs text-slate-400">
+                          <span>
+                            {cat.name} · 共 {cat.tags.length} 个标签
+                          </span>
+                          {selectedGenre !== '全部' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedGenre('全部');
+                                setShowGenreSheet(false);
+                              }}
+                              className="text-amber-400 hover:text-amber-300 font-medium"
+                            >
+                              清除筛选
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                          {cat.tags.map((t) => {
+                            const active = selectedGenre === t.name;
+                            return (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedGenre(t.name);
+                                  setShowGenreSheet(false);
+                                }}
+                                className={`min-h-[40px] px-2.5 rounded-xl text-xs font-medium transition-all truncate flex items-center justify-center gap-1 ${
+                                  active
+                                    ? 'bg-amber-400 text-[#0B0C10] font-bold shadow'
+                                    : 'bg-[#1D202A] text-slate-200 hover:bg-white/10 hover:text-white'
+                                }`}
+                              >
+                                <span>{t.name}</span>
+                                {t.isHot && (
+                                  <Flame className="w-3 h-3 text-red-400 fill-current shrink-0" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Actions */}
+            <div className="pt-2 border-t border-white/[0.08] flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedGenre('全部');
+                  setShowGenreSheet(false);
+                }}
+                className="min-h-[40px] px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-slate-300 transition-colors"
+              >
+                重置为全部题材
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowGenreSheet(false)}
+                className="min-h-[40px] px-6 rounded-xl bg-amber-400 hover:bg-amber-300 text-xs font-bold text-black transition-colors"
+              >
+                完成
+              </button>
             </div>
           </div>
         </div>

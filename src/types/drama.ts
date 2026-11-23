@@ -1,34 +1,25 @@
-export type DramaCategory = '短剧' | '漫剧' | 'AI换脸' | 'AI魔改';
+export type DramaCategory = '全部' | '短剧' | '漫剧' | 'AI换脸' | 'AI魔改' | '黄果原创' | '专题' | '排行榜';
 
-export type DramaGenre =
-  | '全部'
-  | '都市'
-  | '古风'
-  | '奇幻'
-  | '现代'
-  | '职场'
-  | '逆袭'
-  | '校园'
-  | '熟女'
-  | '母子'
-  | '乱伦'
-  | '系统'
-  | '仙侠'
-  | '后宫'
-  | '大男主'
-  | '性转'
-  | '脑洞'
-  | '悬疑'
-  | 'NTR'
-  | '武侠'
-  | '科幻'
-  | '机甲'
-  | '国风'
-  | '恋爱';
+export type DramaGenre = string;
+
+export interface OfficialTagItem {
+  id: number;
+  name: string;
+  slug: string;
+  isHot?: boolean;
+  hotScore?: number;
+}
+
+export interface OfficialTagCategory {
+  id: number;
+  name: string;
+  code: string;
+  tags: OfficialTagItem[];
+}
 
 export interface OfficialCategory {
   id: number;
-  name: DramaCategory;
+  name: string;
   route: string;
 }
 
@@ -37,8 +28,14 @@ export const OFFICIAL_CATEGORIES: OfficialCategory[] = [
   { id: 25, name: '漫剧', route: 'ai-manju' },
   { id: 26, name: 'AI换脸', route: 'ai-huanlian' },
   { id: 27, name: 'AI魔改', route: 'ai-mogai' },
+  { id: 101, name: '黄果原创', route: 'original' },
+  { id: 102, name: '专题', route: 'topics' },
+  { id: 103, name: '排行榜', route: 'ranks' },
 ];
 
+/**
+ * 官方首页 20 个热门标签（按 huangguoai.com 热门标签栏完全对齐）
+ */
 export const POPULAR_TAGS: DramaGenre[] = [
   '全部',
   '都市',
@@ -48,6 +45,7 @@ export const POPULAR_TAGS: DramaGenre[] = [
   '职场',
   '逆袭',
   '校园',
+  '绿帽',
   '熟女',
   '母子',
   '乱伦',
@@ -122,6 +120,7 @@ export interface Drama {
   heatScore: number;
   playCountLabel: string;
   likesBase: number;
+  rating?: number;
   releaseYear: string;
   studio: string;
   synopsis: string;

@@ -2,6 +2,8 @@
 hongguo/
 verify-player.mjs
 .chrome-verify-profile/
+api_tags.json
+scratch_homepage.html
 
 # Logs
 logs

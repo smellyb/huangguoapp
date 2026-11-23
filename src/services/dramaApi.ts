@@ -1,5 +1,17 @@
-import type { ApiConfig, CdnAuthConfig, Drama, DramaCategory, DramaGenre, Episode, RankingType, Topic } from '../types/drama';
+import type {
+  ApiConfig,
+  CdnAuthConfig,
+  Drama,
+  DramaCategory,
+  DramaGenre,
+  Episode,
+  OfficialTagCategory,
+  RankingType,
+  Topic,
+} from '../types/drama';
+import { POPULAR_TAGS } from '../types/drama';
 import { DEMO_DRAMAS, DEMO_TOPICS } from '../data/demoCatalog';
+import OFFICIAL_TAGS_FALLBACK from '../data/officialTags.json';
 import { resolveEncryptedPlayback } from './edgeApiCrypto';
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -244,41 +256,78 @@ function deriveCategory(item: HuangguoVideoItem): DramaCategory {
 }
 
 function deriveGenres(item: HuangguoVideoItem): DramaGenre[] {
-  const validGenres: DramaGenre[] = [
-    '都市',
-    '古风',
-    '奇幻',
-    '现代',
-    '职场',
-    '逆袭',
-    '校园',
-    '熟女',
-    '母子',
-    '乱伦',
-    '系统',
-    '仙侠',
-    '后宫',
-    '大男主',
-    '性转',
-    '脑洞',
-    '悬疑',
-    'NTR',
-    '武侠',
-    '科幻',
-    '机甲',
-    '国风',
-  ];
-  const tags = item.tags || [];
-  const matched = tags.filter((t): t is DramaGenre => validGenres.includes(t as DramaGenre));
-  if (matched.length > 0) return matched;
-  if (tags.some((t) => t.includes('古') || t.includes('仙侠') || t.includes('武侠'))) return ['古风'];
-  if (tags.some((t) => t.includes('悬疑') || t.includes('灵异') || t.includes('恐怖'))) return ['悬疑'];
-  if (tags.some((t) => t.includes('科幻') || t.includes('机甲'))) return ['科幻'];
-  if (tags.some((t) => t.includes('系统') || t.includes('脑洞') || t.includes('游戏'))) return ['系统'];
-  if (tags.some((t) => t.includes('逆袭') || t.includes('打脸') || t.includes('战神'))) return ['逆袭'];
-  if (tags.some((t) => t.includes('职场') || t.includes('商战'))) return ['职场'];
-  if (tags.some((t) => t.includes('现代') || t.includes('都市'))) return ['都市'];
+  // 1. If remote API provided tags array, preserve all clean tags without truncation!
+  if (Array.isArray(item.tags) && item.tags.length > 0) {
+    const raw = item.tags.map((t) => String(t).trim()).filter(Boolean);
+    if (raw.length > 0) return raw;
+  }
+
+  // 2. Fallback: extract matching tags from title or description
+  const combined = `${item.title || ''} ${item.desc || ''} ${item.description || ''}`;
+  const detected: DramaGenre[] = [];
+  for (const t of POPULAR_TAGS) {
+    if (t !== '全部' && combined.includes(t)) {
+      detected.push(t);
+    }
+  }
+  if (detected.length > 0) return detected;
+
+  if (combined.includes('古') || combined.includes('仙侠') || combined.includes('武侠')) return ['古风'];
+  if (combined.includes('悬疑') || combined.includes('灵异') || combined.includes('恐怖')) return ['悬疑'];
+  if (combined.includes('科幻') || combined.includes('机甲')) return ['科幻'];
+  if (combined.includes('系统') || combined.includes('脑洞') || combined.includes('游戏')) return ['系统'];
+  if (combined.includes('逆袭') || combined.includes('打脸') || combined.includes('战神')) return ['逆袭'];
+  if (combined.includes('职场') || combined.includes('商战')) return ['职场'];
   return ['都市'];
+}
+
+/**
+ * 动态拉取 huangguoai.com 官方全维度 9 大类标签（短剧题材、短剧架空、短剧男频、短剧女频、短剧伦理、成人场景等）
+ */
+export async function fetchOfficialTags(baseUrl?: string): Promise<OfficialTagCategory[]> {
+  const activeBase = normalizeBaseUrl(baseUrl || '');
+  if (!activeBase) {
+    return OFFICIAL_TAGS_FALLBACK as OfficialTagCategory[];
+  }
+  try {
+    const res = await fetchJsonWithTimeout<{
+      data?: {
+        categories?: Array<{
+          id: number;
+          name: string;
+          code: string;
+          tags: Array<{
+            id: number;
+            name: string;
+            slug: string;
+            is_hot?: boolean;
+            hot_score?: number;
+          }>;
+        }>;
+      };
+    }>(`${activeBase}/api/tags/`);
+
+    const categories = res?.data?.categories;
+    if (Array.isArray(categories) && categories.length > 0) {
+      return categories
+        .filter((c) => Array.isArray(c.tags) && c.tags.length > 0)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          code: c.code,
+          tags: c.tags.map((t) => ({
+            id: t.id,
+            name: t.name,
+            slug: t.slug,
+            isHot: Boolean(t.is_hot),
+            hotScore: t.hot_score || 0,
+          })),
+        }));
+    }
+  } catch (err) {
+    console.warn('[dramaApi] fetchOfficialTags failed, falling back to bundled catalog:', err);
+  }
+  return OFFICIAL_TAGS_FALLBACK as OfficialTagCategory[];
 }
 
 export function transformHuangguoItemToDrama(item: HuangguoVideoItem, index: number): Drama {
@@ -334,6 +383,7 @@ export function transformHuangguoItemToDrama(item: HuangguoVideoItem, index: num
     heatScore: heat,
     playCountLabel,
     likesBase: item.like_count ?? item.metrics?.like ?? 1500,
+    rating: item.score || 9.5,
     releaseYear: item.play_at?.slice(0, 4) || item.created_at?.slice(0, 4) || '2026',
     studio: item.author?.name || (item.is_original ? '黄果原创' : '黄果短剧'),
     synopsis,

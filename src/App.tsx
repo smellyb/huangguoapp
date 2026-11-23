@@ -13,16 +13,20 @@ import type { AppTab, Drama, Topic } from './types/drama';
 interface DesktopNavItem {
   id: string;
   label: string;
-  tab: AppTab;
+  tab?: AppTab;
   category?: string;
+  action?: 'line' | 'app';
 }
 
 const DESKTOP_NAV_ITEMS: DesktopNavItem[] = [
-  { id: 'nav-home', label: '推荐', tab: 'discover', category: '全部' },
+  { id: 'nav-home', label: '首页', tab: 'discover', category: '全部' },
   { id: 'nav-original', label: '黄果原创', tab: 'discover', category: '黄果原创' },
   { id: 'nav-duanju', label: '短剧', tab: 'discover', category: '短剧' },
   { id: 'nav-manju', label: '漫剧', tab: 'discover', category: '漫剧' },
+  { id: 'nav-topics', label: '专题', tab: 'discover', category: '专题' },
   { id: 'nav-ranks', label: '排行榜', tab: 'discover', category: '排行榜' },
+  { id: 'nav-blog', label: '博客 ▾', tab: 'discover', category: 'AI魔改' },
+  { id: 'nav-path', label: '回家的路', action: 'line' },
   { id: 'nav-search', label: '搜索', tab: 'search' },
   { id: 'nav-profile', label: '我的', tab: 'profile' },
 ];
@@ -340,14 +344,22 @@ export default function App() {
           >
             {DESKTOP_NAV_ITEMS.map((item) => {
               const active =
-                item.tab === activeTab &&
-                (item.category ? (selectedCategory || '全部') === item.category : true);
+                item.tab
+                  ? item.tab === activeTab &&
+                    (item.category ? (selectedCategory || '全部') === item.category : true)
+                  : false;
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    setActiveTab(item.tab);
+                    if (item.action === 'line') {
+                      openLineModal();
+                      return;
+                    }
+                    if (item.tab) {
+                      setActiveTab(item.tab);
+                    }
                     if (item.category) {
                       setSelectedCategory(item.category);
                     }

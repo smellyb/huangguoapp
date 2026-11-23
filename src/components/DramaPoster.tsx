@@ -201,14 +201,29 @@ export function DramaPoster({
         </div>
       </div>
 
-      <div className={compact ? 'mt-2 space-y-0.5' : 'mt-2.5 space-y-1'}>
+      <div className={compact ? 'mt-1.5 space-y-1' : 'mt-2 space-y-1'}>
         <h3 className="text-sm font-semibold text-slate-100 group-hover:text-amber-400 transition-colors line-clamp-1">
           {drama.title}
         </h3>
-        <p className="text-xs text-slate-400 line-clamp-1">
-          {subtitle ??
-            `${drama.category} · ${drama.genres.slice(0, 2).join(' / ')}`}
-        </p>
+        {subtitle ? (
+          <p className="text-xs text-slate-400 line-clamp-1">{subtitle}</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1 overflow-hidden h-5">
+            {drama.category && drama.category !== '全部' && (
+              <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/25 shrink-0">
+                {drama.category}
+              </span>
+            )}
+            {drama.genres.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className="px-1.5 py-0.2 rounded text-[10px] text-slate-400 bg-white/[0.06] shrink-0"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </button>
   );

@@ -34,7 +34,8 @@ import {
   X,
 } from 'lucide-react';
 import { episodeLikeKey } from '../hooks/useUserLibrary';
-import { cleanCoverUrl, fetchEpisodePlayback, getFallbackPoster } from '../services/dramaApi';
+import { cleanCoverUrl, fetchEpisodePlayback } from '../services/dramaApi';
+import { decryptCoverImage, getCachedDecryptedUrl } from '../services/imageDecryptor';
 import {
   cancelPendingPreloads,
   isEpisodeWarmed,
@@ -1022,38 +1023,51 @@ export function TheaterPlayer({
       : (episode.posterUrl ?? drama.posterUrl);
   }, [drama.heroUrl, drama.posterUrl, effectiveLandscape, episode.posterUrl]);
 
-  const [posterStage, setPosterStage] = useState<'primary' | 'clean' | 'fallback' | 'placeholder'>('primary');
+  const [decryptedPosterUrl, setDecryptedPosterUrl] = useState<string>(() => getCachedDecryptedUrl(preferredPoster) || '');
+  const [posterStage, setPosterStage] = useState<'decrypting' | 'ready' | 'fallback' | 'placeholder'>(() => {
+    if (!preferredPoster) return 'placeholder';
+    if (getCachedDecryptedUrl(preferredPoster)) return 'ready';
+    return 'decrypting';
+  });
 
   useEffect(() => {
-    setPosterStage('primary');
+    let active = true;
+    if (!preferredPoster) {
+      setPosterStage('placeholder');
+      setDecryptedPosterUrl('');
+      return;
+    }
+    const cached = getCachedDecryptedUrl(preferredPoster);
+    if (cached) {
+      setDecryptedPosterUrl(cached);
+      setPosterStage('ready');
+      return;
+    }
+    setPosterStage('decrypting');
+    decryptCoverImage(preferredPoster)
+      .then((objUrl) => {
+        if (!active) return;
+        if (objUrl) {
+          setDecryptedPosterUrl(objUrl);
+          setPosterStage('ready');
+        } else {
+          setPosterStage('fallback');
+        }
+      })
+      .catch(() => {
+        if (active) setPosterStage('fallback');
+      });
+    return () => {
+      active = false;
+    };
   }, [preferredPoster]);
 
   const resolvedPosterUrl = useMemo(() => {
-    switch (posterStage) {
-      case 'primary':
-        return preferredPoster;
-      case 'clean':
-        return cleanCoverUrl(preferredPoster);
-      case 'fallback':
-        return getFallbackPoster(drama.id);
-      case 'placeholder':
-        return '';
-    }
-  }, [posterStage, preferredPoster, drama.id]);
+    return posterStage === 'ready' ? decryptedPosterUrl : '';
+  }, [posterStage, decryptedPosterUrl]);
 
   const handlePosterError = () => {
-    if (posterStage === 'primary') {
-      const clean = cleanCoverUrl(preferredPoster);
-      if (clean && clean !== preferredPoster) {
-        setPosterStage('clean');
-        return;
-      }
-      setPosterStage('fallback');
-    } else if (posterStage === 'clean') {
-      setPosterStage('fallback');
-    } else {
-      setPosterStage('placeholder');
-    }
+    setPosterStage('placeholder');
   };
 
   // Pick visual frame: in landscape demo mode prefer widescreen hero visual when available
@@ -1081,7 +1095,7 @@ export function TheaterPlayer({
     if (!failedFrames.has(clean) && clean !== rawActiveFrameUrl) {
       return clean;
     }
-    return getFallbackPoster(drama.id);
+    return '';
   }, [rawActiveFrameUrl, failedFrames, drama.id]);
 
   const handleActiveFrameError = () => {

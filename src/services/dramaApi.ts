@@ -1,4 +1,3 @@
-import { DEMO_DRAMAS, DEMO_TOPICS } from '../data/demoCatalog';
 import type { ApiConfig, CdnAuthConfig, Drama, DramaCategory, DramaGenre, Episode, RankingType, Topic } from '../types/drama';
 import { resolveEncryptedPlayback } from './edgeApiCrypto';
 
@@ -15,7 +14,18 @@ export function isValidHttpUrl(rawUrl: string): boolean {
 }
 
 export function normalizeBaseUrl(rawUrl: string): string {
-  return rawUrl.trim().replace(/\/+$/, '');
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim().replace(/\/+$/, '');
+
+  const isNative =
+    typeof window !== 'undefined' &&
+    Boolean((window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
+
+  if (!isNative && trimmed.includes('huangguoai.com')) {
+    return `${window.location.origin}/api-hg`;
+  }
+
+  return trimmed;
 }
 
 export function normalizeImageUrl(rawUrl?: string): string {
@@ -76,19 +86,8 @@ export function cleanCoverUrl(rawUrl?: string): string {
 /**
  * Returns a reliable bundled fallback poster from DEMO_DRAMAS by index or hash.
  */
-export function getFallbackPoster(indexOrId?: number | string): string {
-  if (typeof indexOrId === 'number') {
-    return DEMO_DRAMAS[Math.abs(indexOrId) % DEMO_DRAMAS.length]?.posterUrl || DEMO_DRAMAS[0].posterUrl;
-  }
-  if (typeof indexOrId === 'string' && indexOrId) {
-    let hash = 0;
-    for (let i = 0; i < indexOrId.length; i++) {
-      hash = (hash << 5) - hash + indexOrId.charCodeAt(i);
-      hash |= 0;
-    }
-    return DEMO_DRAMAS[Math.abs(hash) % DEMO_DRAMAS.length]?.posterUrl || DEMO_DRAMAS[0].posterUrl;
-  }
-  return DEMO_DRAMAS[0].posterUrl;
+export function getFallbackPoster(_indexOrId?: number | string): string {
+  return COVER_PLACEHOLDER_DATA_URL;
 }
 
 /**
@@ -253,10 +252,16 @@ function deriveGenres(item: HuangguoVideoItem): DramaGenre[] {
     '逆袭',
     '校园',
     '熟女',
+    '母子',
+    '乱伦',
     '系统',
     '仙侠',
     '后宫',
+    '大男主',
+    '性转',
+    '脑洞',
     '悬疑',
+    'NTR',
     '武侠',
     '科幻',
     '机甲',
@@ -276,7 +281,7 @@ function deriveGenres(item: HuangguoVideoItem): DramaGenre[] {
 }
 
 export function transformHuangguoItemToDrama(item: HuangguoVideoItem, index: number): Drama {
-  const posterUrl = normalizeImageUrl(item.cover) || DEMO_DRAMAS[index % DEMO_DRAMAS.length].posterUrl;
+  const posterUrl = normalizeImageUrl(item.cover) || '';
   const totalEpisodes =
     (typeof item.total_episodes === 'number' && item.total_episodes > 0 ? item.total_episodes : 0) ||
     (typeof item.episode_count === 'number' && item.episode_count > 0 ? item.episode_count : 0) ||
@@ -576,9 +581,9 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
 
   if (!activeBase) {
     return {
-      dramas: DEMO_DRAMAS,
-      topics: DEMO_TOPICS,
-      source: 'demo',
+      dramas: [],
+      topics: [],
+      source: 'custom',
     };
   }
 
@@ -643,8 +648,7 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
 
     if (rawDramas.length > 0) {
       const dramas = rawDramas.map((item, idx) => {
-        const fallback = DEMO_DRAMAS[idx % DEMO_DRAMAS.length];
-        const posterUrl = item.posterUrl ? normalizeImageUrl(item.posterUrl) : fallback.posterUrl;
+        const posterUrl = item.posterUrl ? normalizeImageUrl(item.posterUrl) : COVER_PLACEHOLDER_DATA_URL;
         return {
           id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `custom-drama-${idx + 1}`,
           title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `未命名短剧 ${idx + 1}`,
@@ -705,18 +709,18 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
   } catch (err) {
     const reason = err instanceof Error ? err.message : '无法连接至短剧片源接口';
     return {
-      dramas: DEMO_DRAMAS,
-      topics: DEMO_TOPICS,
-      source: 'demo',
-      warning: `片源接口连接受阻（${reason}）。已平滑回退至内置演示库。请确保本地代理开启（如 127.0.0.1:7897）。`,
+      dramas: [],
+      topics: [],
+      source: 'custom',
+      warning: `片源接口连接受阻（${reason}）。请确保本地代理开启（如 127.0.0.1:7897）。`,
     };
   }
 
   return {
-    dramas: DEMO_DRAMAS,
-    topics: DEMO_TOPICS,
-    source: 'demo',
-    warning: '片源接口未返回剧集列表，已自动回退至内置演示库。',
+    dramas: [],
+    topics: [],
+    source: 'custom',
+    warning: '片源接口未返回剧集列表，请检查网络或切换线路。',
   };
 }
 

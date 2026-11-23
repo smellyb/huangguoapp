@@ -151,9 +151,9 @@ export function ProfileView({
   };
 
   const handleUseDemoMode = () => {
-    onUpdateApiConfig({ mode: 'demo' });
+    onUpdateApiConfig({ mode: 'custom', baseUrl: 'https://huangguoai.com' });
     setTestResult(null);
-    onNotify('已切换回内置精选短剧片源库');
+    onNotify('已重置为官方片源接口');
   };
 
   const handleCopySchema = async () => {
@@ -519,7 +519,7 @@ export function ProfileView({
                   className="min-h-[44px] px-4 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-sm font-medium inline-flex items-center gap-2 transition-colors whitespace-nowrap"
                 >
                   <Database className="w-4 h-4" aria-hidden="true" />
-                  <span>使用内置精选库</span>
+                  <span>重置为官方接口</span>
                 </button>
               </div>
             </form>

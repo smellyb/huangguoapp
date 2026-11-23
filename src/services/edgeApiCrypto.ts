@@ -85,13 +85,25 @@ function getSubtleCrypto(): SubtleCrypto | null {
   return null;
 }
 
+function normalizeEdgeBase(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  const isNative =
+    typeof window !== 'undefined' &&
+    Boolean((window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
+
+  if (!isNative && trimmed.includes('huangguoai.com')) {
+    return `${window.location.origin}/api-hg`;
+  }
+  return trimmed;
+}
+
 async function openSession(baseUrl: string, scope: 'playback' | 'user' | 'public' | 'dynamic'): Promise<EdgeSession> {
   const subtle = getSubtleCrypto();
   if (!subtle) {
     throw new Error('当前环境不支持 Web Cryptography API');
   }
 
-  const normalizedBase = baseUrl.trim().replace(/\/+$/, '');
+  const normalizedBase = normalizeEdgeBase(baseUrl);
   const endpoint = `${normalizedBase}/api/${scope}/request`;
 
   const ecdh = { name: 'ECDH', namedCurve: 'P-256' } as const;
@@ -203,7 +215,7 @@ async function openSession(baseUrl: string, scope: 'playback' | 'user' | 'public
 }
 
 function getSession(baseUrl: string, scope: 'playback' | 'user' | 'public' | 'dynamic'): Promise<EdgeSession> {
-  const normalizedBase = baseUrl.trim().replace(/\/+$/, '');
+  const normalizedBase = normalizeEdgeBase(baseUrl);
   const key = `${scope}::${normalizedBase}`;
   const existing = sessions.get(key);
   const now = Math.floor(Date.now() / 1000);

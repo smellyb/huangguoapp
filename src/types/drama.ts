@@ -1,6 +1,7 @@
 export type DramaCategory = '短剧' | '漫剧' | 'AI换脸' | 'AI魔改';
 
 export type DramaGenre =
+  | '全部'
   | '都市'
   | '古风'
   | '奇幻'
@@ -9,10 +10,16 @@ export type DramaGenre =
   | '逆袭'
   | '校园'
   | '熟女'
+  | '母子'
+  | '乱伦'
   | '系统'
   | '仙侠'
   | '后宫'
+  | '大男主'
+  | '性转'
+  | '脑洞'
   | '悬疑'
+  | 'NTR'
   | '武侠'
   | '科幻'
   | '机甲'
@@ -32,6 +39,7 @@ export const OFFICIAL_CATEGORIES: OfficialCategory[] = [
 ];
 
 export const POPULAR_TAGS: DramaGenre[] = [
+  '全部',
   '都市',
   '古风',
   '奇幻',
@@ -40,10 +48,16 @@ export const POPULAR_TAGS: DramaGenre[] = [
   '逆袭',
   '校园',
   '熟女',
+  '母子',
+  '乱伦',
   '系统',
   '仙侠',
   '后宫',
+  '大男主',
+  '性转',
+  '脑洞',
   '悬疑',
+  'NTR',
   '武侠',
 ];
 

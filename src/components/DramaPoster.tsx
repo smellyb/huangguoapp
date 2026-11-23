@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Film, Play } from 'lucide-react';
 import type { Drama } from '../types/drama';
-import { cleanCoverUrl, getFallbackPoster } from '../services/dramaApi';
+import { decryptCoverImage, getCachedDecryptedUrl } from '../services/imageDecryptor';
 
 export interface CoverPlaceholderProps {
   title?: string;
@@ -59,7 +59,6 @@ export interface DramaCoverImageProps {
 export function DramaCoverImage({
   src,
   alt,
-  fallbackId,
   className = '',
   title,
   category,
@@ -68,54 +67,59 @@ export function DramaCoverImage({
   referrerPolicy = 'no-referrer',
   loading = 'lazy',
 }: DramaCoverImageProps) {
-  // Stages: primary -> clean (strip auth_key/sign) -> fallback (local demo poster) -> placeholder
-  const [stage, setStage] = useState<'primary' | 'clean' | 'fallback' | 'placeholder'>('primary');
+  const [decryptedUrl, setDecryptedUrl] = useState<string>(() => getCachedDecryptedUrl(src) || '');
+  const [stage, setStage] = useState<'decrypting' | 'ready' | 'placeholder'>(() => {
+    if (!src || !src.trim()) return 'placeholder';
+    if (getCachedDecryptedUrl(src)) return 'ready';
+    return 'decrypting';
+  });
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    setStage('primary');
+    let active = true;
+
+    if (!src || typeof src !== 'string' || !src.trim()) {
+      setStage('placeholder');
+      setDecryptedUrl('');
+      return;
+    }
+
+    const cached = getCachedDecryptedUrl(src);
+    if (cached) {
+      setDecryptedUrl(cached);
+      setStage('ready');
+      return;
+    }
+
+    setStage('decrypting');
     setLoaded(false);
+
+    decryptCoverImage(src)
+      .then((objectUrl) => {
+        if (!active) return;
+        if (objectUrl) {
+          setDecryptedUrl(objectUrl);
+          setStage('ready');
+        } else {
+          setStage('placeholder');
+        }
+      })
+      .catch((err) => {
+        console.warn('[DramaCoverImage] Decrypt error:', err);
+        if (!active) return;
+        setStage('placeholder');
+      });
+
+    return () => {
+      active = false;
+    };
   }, [src]);
 
-  const cleanSrc = useMemo(() => cleanCoverUrl(src), [src]);
-  const fallbackSrc = useMemo(() => getFallbackPoster(fallbackId), [fallbackId]);
-
-  const currentSrc = useMemo(() => {
-    switch (stage) {
-      case 'primary':
-        return src;
-      case 'clean':
-        return cleanSrc;
-      case 'fallback':
-        return fallbackSrc;
-      case 'placeholder':
-        return '';
-    }
-  }, [stage, src, cleanSrc, fallbackSrc]);
-
   const handleError = () => {
-    if (stage === 'primary') {
-      if (cleanSrc && cleanSrc !== src) {
-        setStage('clean');
-        return;
-      }
-      if (fallbackSrc && fallbackSrc !== src) {
-        setStage('fallback');
-        return;
-      }
-      setStage('placeholder');
-    } else if (stage === 'clean') {
-      if (fallbackSrc && fallbackSrc !== cleanSrc) {
-        setStage('fallback');
-        return;
-      }
-      setStage('placeholder');
-    } else {
-      setStage('placeholder');
-    }
+    setStage('placeholder');
   };
 
-  if (stage === 'placeholder' || !currentSrc) {
+  if (stage === 'placeholder' || !decryptedUrl) {
     return (
       <CoverPlaceholder
         title={title}
@@ -127,9 +131,9 @@ export function DramaCoverImage({
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden bg-[#14161D]">
       <img
-        src={currentSrc}
+        src={decryptedUrl}
         alt={alt}
         loading={loading}
         decoding="async"
@@ -139,7 +143,9 @@ export function DramaCoverImage({
         className={`${className} ${loaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-200`}
       />
       {!loaded && (
-        <div className="cover-placeholder absolute inset-0 bg-[#14161D] animate-pulse" />
+        <div className="cover-placeholder absolute inset-0 bg-[#14161D] animate-pulse flex items-center justify-center">
+          <Film className="w-5 h-5 text-amber-500/20" />
+        </div>
       )}
     </div>
   );
@@ -168,7 +174,6 @@ export function DramaPoster({
         <DramaCoverImage
           src={drama.posterUrl}
           alt={drama.title}
-          fallbackId={drama.id}
           title={drama.title}
           category={drama.category}
           genres={drama.genres}

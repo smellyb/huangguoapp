@@ -8,21 +8,13 @@ const MAX_SEARCH_HISTORY = 10;
 const envApiBase = (import.meta.env.VITE_DRAMA_API_BASE_URL as string | undefined)?.trim() ?? '';
 
 const DEFAULT_STATE: UserLibraryState = {
-  followedIds: ['time-fold-2049', 'shan-hai-qingluan'],
-  likedEpisodeKeys: ['time-fold-2049::1'],
-  watchHistory: [
-    {
-      dramaId: 'time-fold-2049',
-      episodeNumber: 1,
-      progressSeconds: 26,
-      durationSeconds: 72,
-      updatedAt: Date.now() - 1000 * 60 * 18,
-    },
-  ],
-  searchHistory: ['时序折叠', '漫剧'],
+  followedIds: [],
+  likedEpisodeKeys: [],
+  watchHistory: [],
+  searchHistory: ['神瞳觉醒', '女友帮我操闺蜜', '短剧', '漫剧'],
   apiConfig: {
-    mode: envApiBase ? 'custom' : 'demo',
-    baseUrl: envApiBase,
+    mode: 'custom',
+    baseUrl: envApiBase || 'https://huangguoai.com',
     preferredQuality: 'auto',
   },
 };
@@ -134,13 +126,15 @@ export function useUserLibrary() {
         updatedAt: now,
       };
 
-      setState((prev) => {
-        const rest = prev.watchHistory.filter((item) => item.dramaId !== dramaId);
-        return {
-          ...prev,
-          watchHistory: [entry, ...rest].slice(0, MAX_HISTORY_ITEMS),
-        };
-      });
+      setTimeout(() => {
+        setState((prev) => {
+          const rest = prev.watchHistory.filter((item) => item.dramaId !== dramaId);
+          return {
+            ...prev,
+            watchHistory: [entry, ...rest].slice(0, MAX_HISTORY_ITEMS),
+          };
+        });
+      }, 0);
     },
     []
   );

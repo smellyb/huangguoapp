@@ -1,53 +1,43 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
-  Bookmark,
-  BookmarkCheck,
   ChevronRight,
   Flame,
-  Play,
   Search,
 } from 'lucide-react';
-import { cleanCoverUrl, deriveRankings, getFallbackPoster } from '../services/dramaApi';
+import { deriveRankings } from '../services/dramaApi';
 import { POPULAR_TAGS, type Drama, type RankingType, type Topic } from '../types/drama';
 import { DramaCoverImage, DramaPoster } from './DramaPoster';
 
 interface DiscoverViewProps {
   dramas: Drama[];
   topics: Topic[];
-  followedIds: string[];
+  followedIds?: string[];
   loading: boolean;
   warning?: string;
   selectedCategory?: string;
   onSelectCategory?: (category: string) => void;
   onPlayDrama: (drama: Drama, episodeNumber?: number) => void;
-  onToggleFollow: (dramaId: string) => void;
+  onToggleFollow?: (dramaId: string) => void;
   onOpenSearch: () => void;
   onOpenLineSelector?: () => void;
 }
 
-const FILTER_CATEGORIES = [
-  '全部',
-  '短剧',
-  '漫剧',
-  'AI换脸',
-  'AI魔改',
-] as const;
-
 export function DiscoverView({
   dramas,
   topics,
-  followedIds,
+  followedIds: _followedIds,
   loading,
   warning,
   selectedCategory,
   onSelectCategory,
   onPlayDrama,
-  onToggleFollow,
+  onToggleFollow: _onToggleFollow,
   onOpenSearch,
   onOpenLineSelector,
 }: DiscoverViewProps) {
   const [activeFilter, setActiveFilter] = useState<string>(selectedCategory || '全部');
+  const [sortMode, setSortMode] = useState<'latest' | 'hot' | 'recommended'>('latest');
   const [rankingTab, setRankingTab] = useState<RankingType>('hot');
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
 
@@ -60,59 +50,6 @@ export function DiscoverView({
   const handleSelectFilter = (filter: string) => {
     setActiveFilter(filter);
     onSelectCategory?.(filter);
-  };
-
-  const featuredDrama = useMemo(
-    () => dramas.find((d) => d.isFeatured) ?? dramas[0],
-    [dramas]
-  );
-
-  const heroSrc = featuredDrama ? (featuredDrama.heroUrl ?? featuredDrama.posterUrl) : '';
-  const [heroStage, setHeroStage] = useState<'primary' | 'clean' | 'fallback' | 'placeholder'>('primary');
-
-  useEffect(() => {
-    setHeroStage('primary');
-  }, [featuredDrama?.id, heroSrc]);
-
-  const cleanHeroSrc = useMemo(() => cleanCoverUrl(heroSrc), [heroSrc]);
-  const fallbackHeroSrc = useMemo(
-    () => (featuredDrama ? getFallbackPoster(featuredDrama.id) : ''),
-    [featuredDrama]
-  );
-
-  const currentHeroSrc = useMemo(() => {
-    switch (heroStage) {
-      case 'primary':
-        return heroSrc;
-      case 'clean':
-        return cleanHeroSrc;
-      case 'fallback':
-        return fallbackHeroSrc;
-      case 'placeholder':
-        return '';
-    }
-  }, [heroStage, heroSrc, cleanHeroSrc, fallbackHeroSrc]);
-
-  const handleHeroError = () => {
-    if (heroStage === 'primary') {
-      if (cleanHeroSrc && cleanHeroSrc !== heroSrc) {
-        setHeroStage('clean');
-        return;
-      }
-      if (fallbackHeroSrc && fallbackHeroSrc !== heroSrc) {
-        setHeroStage('fallback');
-        return;
-      }
-      setHeroStage('placeholder');
-    } else if (heroStage === 'clean') {
-      if (fallbackHeroSrc && fallbackHeroSrc !== cleanHeroSrc) {
-        setHeroStage('fallback');
-        return;
-      }
-      setHeroStage('placeholder');
-    } else {
-      setHeroStage('placeholder');
-    }
   };
 
   const filteredDramas = useMemo(() => {
@@ -131,6 +68,39 @@ export function DiscoverView({
         d.synopsis.includes(activeFilter)
     );
   }, [dramas, activeFilter, selectedTopic]);
+
+  const currentCategoryTitle = useMemo(() => {
+    if (!activeFilter || activeFilter === '全部') return 'AI成人短剧';
+    if (activeFilter === '短剧') return 'AI成人短剧';
+    if (activeFilter === '黄果原创') return '黄果独家原创短剧';
+    if (activeFilter === '漫剧') return 'AI成人漫剧';
+    return activeFilter;
+  }, [activeFilter]);
+
+  const sectionTitle = useMemo(() => {
+    switch (sortMode) {
+      case 'latest':
+        return `最新更新的${currentCategoryTitle}`;
+      case 'hot':
+        return `当前热播的${currentCategoryTitle}`;
+      case 'recommended':
+        return `精选推荐的${currentCategoryTitle}`;
+    }
+  }, [sortMode, currentCategoryTitle]);
+
+  const sortedDramas = useMemo(() => {
+    const list = [...filteredDramas];
+    if (sortMode === 'hot') {
+      list.sort((a, b) => b.heatScore - a.heatScore);
+    } else if (sortMode === 'recommended') {
+      list.sort((a, b) => {
+        if (a.isFeatured && !b.isFeatured) return -1;
+        if (!a.isFeatured && b.isFeatured) return 1;
+        return b.heatScore - a.heatScore;
+      });
+    }
+    return list;
+  }, [filteredDramas, sortMode]);
 
   const rankedDramas = useMemo(
     () => deriveRankings(dramas, rankingTab).slice(0, 6),
@@ -227,118 +197,87 @@ export function DiscoverView({
             </p>
           </div>
         </section>
-      ) : (
-        featuredDrama && (
-          <section className="relative overflow-hidden rounded-3xl bg-[#14161D] border border-white/[0.08]">
-            <div className="relative min-h-[300px] sm:min-h-[380px] lg:min-h-[430px] flex items-end">
-              {heroStage !== 'placeholder' && currentHeroSrc ? (
-                <img
-                  src={currentHeroSrc}
-                  alt={featuredDrama.title}
-                  referrerPolicy="no-referrer"
-                  onError={handleHeroError}
-                  className="absolute inset-0 h-full w-full object-cover object-center"
-                />
-              ) : (
-                <div
-                  data-testid="cover-placeholder"
-                  className="cover-placeholder absolute inset-0 bg-gradient-to-br from-[#1D202A] via-[#14161D] to-[#0B0C10]"
-                />
-              )}
+      ) : null}
 
-              <div className="absolute inset-0 bg-gradient-to-t from-[#0B0C10] via-[#0B0C10]/65 to-transparent" />
-              <div className="absolute inset-0 bg-gradient-to-r from-[#0B0C10]/90 via-[#0B0C10]/45 to-transparent" />
-
-              <div className="relative z-10 w-full p-6 sm:p-10 lg:p-12 max-w-2xl space-y-4">
-                <p className="text-xs sm:text-sm text-amber-300/95 font-medium">
-                  今日主推 <span aria-hidden="true">·</span> {featuredDrama.category}{' '}
-                  <span aria-hidden="true">·</span>{' '}
-                  {featuredDrama.genres.join(' / ')}
-                </p>
-
-                <h1
-                  className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-white leading-[1.12]"
-                  style={{ textWrap: 'balance' }}
-                >
-                  {featuredDrama.title}
-                </h1>
-
-                <p className="text-sm sm:text-base text-slate-200/90 leading-relaxed line-clamp-2 sm:line-clamp-3">
-                  {featuredDrama.tagline}
-                </p>
-
-                <p className="text-xs text-slate-300 font-mono tabular-nums">
-                  {featuredDrama.status === '已完结'
-                    ? `全 ${featuredDrama.totalEpisodes} 集`
-                    : `更至 ${featuredDrama.updatedEpisodes} / ${featuredDrama.totalEpisodes} 集`}{' '}
-                  <span aria-hidden="true">·</span> {featuredDrama.playCountLabel} 播放{' '}
-                  <span aria-hidden="true">·</span> {featuredDrama.studio}
-                </p>
-
-                <div className="pt-2 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => onPlayDrama(featuredDrama)}
-                    className="min-h-[44px] px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-sm font-semibold inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B0C10]"
-                  >
-                    <Play className="w-4 h-4 fill-current" aria-hidden="true" />
-                    <span>立即观看</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => onToggleFollow(featuredDrama.id)}
-                    className="min-h-[44px] px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-100 border border-white/15 text-sm font-medium inline-flex items-center gap-2 backdrop-blur-md transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-                  >
-                    {followedIds.includes(featuredDrama.id) ? (
-                      <>
-                        <BookmarkCheck className="w-4 h-4 text-amber-400" aria-hidden="true" />
-                        <span>已追剧</span>
-                      </>
-                    ) : (
-                      <>
-                        <Bookmark className="w-4 h-4" aria-hidden="true" />
-                        <span>加入追剧</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-        )
-      )}
-
-      {/* Interactive Category Segmented Bar & Popular Tags */}
+      {/* Official Category Bar, Breadcrumbs, Sort Pills, and Section Title (Synced with huangguoai.com) */}
       {!selectedTopic && (
-        <section aria-label="题材与频道筛选" className="space-y-4">
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-            {FILTER_CATEGORIES.map((option) => {
-              const active = activeFilter === option;
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => handleSelectFilter(option)}
-                  aria-pressed={active}
-                  className={`min-h-[40px] px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
-                    active
-                      ? 'bg-amber-500 text-[#0B0C10] font-semibold shadow-md shadow-amber-500/10'
-                      : 'bg-[#14161D] text-slate-300 border border-white/[0.08] hover:text-white hover:border-white/20'
-                  }`}
-                >
-                  {option}
-                </button>
-              );
-            })}
+        <section aria-label="分类导航与筛选" className="space-y-4 pt-1">
+          {/* Breadcrumb Navigation */}
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium select-none">
+            <button
+              type="button"
+              onClick={() => handleSelectFilter('全部')}
+              className="hover:text-amber-400 transition-colors"
+            >
+              首页
+            </button>
+            <span className="text-slate-600">/</span>
+            <span className="text-amber-400 font-bold">{currentCategoryTitle}</span>
           </div>
 
-          {/* Official Popular Tags Bar (Synced with huangguoai.com) */}
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-1">
-            <span className="text-xs font-semibold text-slate-400 shrink-0 flex items-center gap-1 pr-1">
-              <Flame className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
-              热门标签:
-            </span>
+          {/* Subtitle Description */}
+          <p className="text-sm sm:text-base text-slate-200 font-normal leading-relaxed">
+            <strong className="text-white font-bold">{currentCategoryTitle}</strong> 精选热播短剧，汇集独家原创、精选推荐与最新更新内容。
+          </p>
+
+          {/* Filter Pills: [最近更新] [当前热播] [精选推荐] */}
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setSortMode('latest')}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                sortMode === 'latest'
+                  ? 'bg-amber-400 text-[#0B0C10] shadow-md shadow-amber-400/20'
+                  : 'bg-[#181B24] hover:bg-[#222533] text-slate-300'
+              }`}
+            >
+              最近更新
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortMode('hot')}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                sortMode === 'hot'
+                  ? 'bg-amber-400 text-[#0B0C10] shadow-md shadow-amber-400/20'
+                  : 'bg-[#181B24] hover:bg-[#222533] text-slate-300'
+              }`}
+            >
+              当前热播
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortMode('recommended')}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                sortMode === 'recommended'
+                  ? 'bg-amber-400 text-[#0B0C10] shadow-md shadow-amber-400/20'
+                  : 'bg-[#181B24] hover:bg-[#222533] text-slate-300'
+              }`}
+            >
+              精选推荐
+            </button>
+          </div>
+
+          {/* Section Title with bold yellow vertical bar | */}
+          <div className="pt-2 flex items-center justify-between gap-4">
+            <div className="flex items-center">
+              <span className="inline-block w-1.5 h-6 rounded-sm bg-amber-400 mr-2.5 shrink-0" />
+              <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-wide">
+                {sectionTitle}
+              </h2>
+            </div>
+            {activeFilter !== '全部' && (
+              <button
+                type="button"
+                onClick={() => handleSelectFilter('全部')}
+                className="text-xs sm:text-sm text-amber-400 hover:text-amber-300 transition-colors shrink-0 font-medium"
+              >
+                查看全部
+              </button>
+            )}
+          </div>
+
+          {/* Official Popular Tags Row (Synced with huangguoai.com) */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-1 pb-1">
             {POPULAR_TAGS.map((tag) => {
               const active = activeFilter === tag;
               return (
@@ -346,11 +285,10 @@ export function DiscoverView({
                   key={tag}
                   type="button"
                   onClick={() => handleSelectFilter(tag)}
-                  aria-pressed={active}
-                  className={`min-h-[30px] px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
+                  className={`min-h-[30px] px-3.5 py-1 rounded-full text-xs transition-colors whitespace-nowrap shrink-0 border ${
                     active
-                      ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40 font-semibold'
-                      : 'bg-white/[0.04] text-slate-400 border border-white/[0.06] hover:text-slate-200 hover:border-white/15'
+                      ? 'bg-amber-400 text-[#0B0C10] font-bold border-amber-400 shadow-sm'
+                      : 'bg-[#14161D] text-slate-300 border-white/[0.08] hover:text-white hover:bg-[#1E202B]'
                   }`}
                 >
                   {tag}
@@ -361,34 +299,9 @@ export function DiscoverView({
         </section>
       )}
 
-      {/* New Releases / Filtered Grid */}
-      <section className="space-y-5">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-slate-50">
-              {selectedTopic
-                ? '专题片单'
-                : activeFilter === '全部'
-                  ? '最新上架'
-                  : `${activeFilter}精选`}
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1 tabular-nums">
-              共 {filteredDramas.length} 部短剧 <span aria-hidden="true">·</span> 点击海报直达竖屏剧场
-            </p>
-          </div>
-
-          {!selectedTopic && activeFilter !== '全部' && (
-            <button
-              type="button"
-              onClick={() => handleSelectFilter('全部')}
-              className="min-h-[44px] text-xs sm:text-sm font-medium text-amber-400 hover:text-amber-300 transition-colors whitespace-nowrap shrink-0"
-            >
-              查看全部
-            </button>
-          )}
-        </div>
-
-        {filteredDramas.length === 0 ? (
+      {/* Drama Grid */}
+      <section className="space-y-4">
+        {sortedDramas.length === 0 ? (
           <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] py-14 px-6 text-center space-y-3">
             <p className="text-base font-medium text-slate-200">
               当前分类暂无匹配剧集
@@ -402,8 +315,8 @@ export function DiscoverView({
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-5">
-            {filteredDramas.map((drama) => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5 sm:gap-4 lg:gap-5">
+            {sortedDramas.map((drama) => (
               <DramaPoster
                 key={drama.id}
                 drama={drama}

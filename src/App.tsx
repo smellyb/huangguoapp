@@ -5,7 +5,6 @@ import { LineSelectorModal } from './components/LineSelectorModal';
 import { ProfileView } from './components/ProfileView';
 import { SearchView } from './components/SearchView';
 import { TheaterPlayer } from './components/TheaterPlayer';
-import { DEMO_DRAMAS, DEMO_TOPICS } from './data/demoCatalog';
 import { useUserLibrary } from './hooks/useUserLibrary';
 import { fetchDramaDetail, loadDramaCatalog } from './services/dramaApi';
 import { DEFAULT_PERMANENT_DOMAINS, DEFAULT_SPEED_LINES } from './services/publishLines';
@@ -14,19 +13,21 @@ import type { AppTab, Drama, Topic } from './types/drama';
 interface DesktopNavItem {
   id: string;
   label: string;
-  tab: AppTab;
+  tab?: AppTab;
   category?: string;
+  action?: 'line' | 'app';
 }
 
 const DESKTOP_NAV_ITEMS: DesktopNavItem[] = [
   { id: 'nav-home', label: '首页', tab: 'discover', category: '全部' },
+  { id: 'nav-original', label: '黄果原创', tab: 'discover', category: '黄果原创' },
   { id: 'nav-duanju', label: '短剧', tab: 'discover', category: '短剧' },
   { id: 'nav-manju', label: '漫剧', tab: 'discover', category: '漫剧' },
-  { id: 'nav-huanlian', label: 'AI换脸', tab: 'discover', category: 'AI换脸' },
-  { id: 'nav-mogai', label: 'AI魔改', tab: 'discover', category: 'AI魔改' },
-  { id: 'nav-theater', label: '剧场', tab: 'theater' },
-  { id: 'nav-search', label: '搜索', tab: 'search' },
-  { id: 'nav-profile', label: '我的', tab: 'profile' },
+  { id: 'nav-topics', label: '专题', tab: 'discover', category: '专题' },
+  { id: 'nav-ranks', label: '排行榜', tab: 'discover', category: '排行榜' },
+  { id: 'nav-blog', label: '博客 ▾', tab: 'discover', category: 'AI魔改' },
+  { id: 'nav-path', label: '回家的路', action: 'line' },
+  { id: 'nav-app', label: '黄果短剧APP', action: 'app' },
 ];
 
 const MOBILE_NAV_ITEMS: { id: AppTab; label: string; icon: typeof Compass }[] = [
@@ -35,6 +36,29 @@ const MOBILE_NAV_ITEMS: { id: AppTab; label: string; icon: typeof Compass }[] = 
   { id: 'search', label: '搜索', icon: Search },
   { id: 'profile', label: '我的', icon: User },
 ];
+
+export function BrandLogo({ className = '' }: { className?: string }) {
+  return (
+    <div className={`flex items-center gap-2 select-none ${className}`}>
+      {/* Yellow fruit icon with play mark */}
+      <div className="relative w-8 h-8 shrink-0 flex items-center justify-center">
+        {/* Leaf */}
+        <div className="absolute -top-0.5 right-1.5 w-2.5 h-2 rounded-full bg-emerald-400 rotate-45 transform origin-bottom-left" />
+        {/* Round yellow citrus fruit */}
+        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-300 via-amber-400 to-amber-500 shadow-md shadow-amber-500/25 flex items-center justify-center">
+          <div className="w-0 h-0 border-y-[4.5px] border-y-transparent border-l-[7px] border-l-white ml-0.5" />
+        </div>
+      </div>
+      <div className="flex flex-col text-left leading-tight">
+        <div className="flex items-baseline gap-0.5">
+          <span className="font-display text-base sm:text-lg font-black tracking-tight text-white">黄果短剧</span>
+          <span className="text-[10px] sm:text-xs font-black text-amber-400 font-mono">AI</span>
+        </div>
+        <span className="text-[9px] sm:text-[10px] text-slate-400 font-mono tracking-wider">huangguoai.com</span>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const {
@@ -52,14 +76,14 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<AppTab>('discover');
   const [selectedCategory, setSelectedCategory] = useState<string>('全部');
-  const [dramas, setDramas] = useState<Drama[]>(DEMO_DRAMAS);
-  const [topics, setTopics] = useState<Topic[]>(DEMO_TOPICS);
-  const [dataSource, setDataSource] = useState<'demo' | 'custom'>('demo');
-  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [dramas, setDramas] = useState<Drama[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [dataSource, setDataSource] = useState<'demo' | 'custom'>('custom');
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogWarning, setCatalogWarning] = useState<string | undefined>();
 
   const [currentDramaId, setCurrentDramaId] = useState<string>(
-    state.watchHistory[0]?.dramaId ?? DEMO_DRAMAS[0].id
+    state.watchHistory[0]?.dramaId ?? ''
   );
   const [currentEpisodeNumber, setCurrentEpisodeNumber] = useState<number>(
     state.watchHistory[0]?.episodeNumber ?? 1
@@ -129,7 +153,7 @@ export default function App() {
   }, [state.apiConfig.mode, state.apiConfig.baseUrl]);
 
   const activeDrama = useMemo(
-    () => dramas.find((d) => d.id === currentDramaId) ?? dramas[0] ?? DEMO_DRAMAS[0],
+    () => dramas.find((d) => d.id === currentDramaId) ?? dramas[0] ?? null,
     [dramas, currentDramaId]
   );
 
@@ -214,8 +238,8 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-[#0B0C10] text-[#F8FAFC]">
       {/* Desktop 3-Zone Top Bar Contract */}
-      <header className="hidden md:block sticky top-0 z-30 h-16 bg-[#0B0C10]/90 backdrop-blur-md border-b border-white/[0.08]">
-        <div className="max-w-7xl mx-auto h-full px-6 lg:px-8 flex items-center justify-between gap-8">
+      <header className="hidden md:block sticky top-0 z-30 h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-white/[0.08]">
+        <div className="max-w-7xl mx-auto h-full px-4 lg:px-8 flex items-center justify-between gap-6">
           <button
             type="button"
             onClick={() => {
@@ -223,34 +247,45 @@ export default function App() {
               setSelectedCategory('全部');
               window.scrollTo({ top: 0 });
             }}
-            className="font-display text-lg font-bold tracking-tight text-white hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded-sm"
+            className="shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded-lg p-1 -m-1"
           >
-            黄果短剧
+            <BrandLogo />
           </button>
 
           <nav
             aria-label="主导航"
-            className="flex items-center gap-5 lg:gap-7 text-sm font-medium"
+            className="flex items-center gap-4 lg:gap-6 text-sm font-medium overflow-x-auto no-scrollbar py-1"
           >
             {DESKTOP_NAV_ITEMS.map((item) => {
               const active =
-                activeTab === item.tab &&
-                (item.tab !== 'discover' || (selectedCategory || '全部') === (item.category || '全部'));
+                item.tab === activeTab &&
+                (item.category ? (selectedCategory || '全部') === item.category : true);
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    setActiveTab(item.tab);
+                    if (item.action === 'line') {
+                      setIsLineModalOpen(true);
+                      return;
+                    }
+                    if (item.action === 'app') {
+                      showToast('已为您提供官方 Android APK 下载');
+                      window.open('https://huangguoai.com/app', '_blank');
+                      return;
+                    }
+                    if (item.tab) {
+                      setActiveTab(item.tab);
+                    }
                     if (item.category) {
                       setSelectedCategory(item.category);
                     }
                     window.scrollTo({ top: 0 });
                   }}
-                  className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
+                  className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 text-sm ${
                     active
-                      ? 'text-amber-400 border-amber-400 font-semibold'
-                      : 'text-slate-300 border-transparent hover:text-white'
+                      ? 'text-amber-400 border-amber-400 font-bold'
+                      : 'text-slate-300 border-transparent hover:text-white font-medium'
                   }`}
                 >
                   {item.label}
@@ -259,7 +294,7 @@ export default function App() {
             })}
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 shrink-0">
             <button
               type="button"
               onClick={() => setIsLineModalOpen(true)}
@@ -281,7 +316,7 @@ export default function App() {
                   openTheater(activeDrama, 1, 0);
                 }
               }}
-              className="min-h-[40px] px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-sm font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 shadow-md shadow-amber-500/10"
             >
               <Play className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
               <span>{latestWatched ? '继续刷剧' : '进入剧场'}</span>
@@ -292,27 +327,27 @@ export default function App() {
 
       {/* Mobile Compact Header (hidden in immersive Theater mode for maximum video height) */}
       {activeTab !== 'theater' && (
-        <header className="md:hidden sticky top-0 z-30 h-[52px] px-4 bg-[#0B0C10]/90 backdrop-blur-md border-b border-white/[0.08] flex items-center justify-between gap-3">
+        <header className="md:hidden sticky top-0 z-30 h-[52px] px-3 bg-[#0B0C10]/95 backdrop-blur-md border-b border-white/[0.08] flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => {
               setActiveTab('discover');
               setSelectedCategory('全部');
             }}
-            className="font-display text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0"
+            className="shrink-0 focus-visible:outline-none p-1"
           >
-            黄果短剧
+            <BrandLogo />
           </button>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setIsLineModalOpen(true)}
-              className="min-h-[34px] px-2.5 rounded-xl bg-white/[0.06] border border-amber-500/30 text-amber-300 text-xs font-semibold inline-flex items-center gap-1.5"
+              className="min-h-[32px] px-2.5 rounded-xl bg-white/[0.06] border border-amber-500/30 text-amber-300 text-[11px] font-semibold inline-flex items-center gap-1.5"
               title="切换短剧线路"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="truncate max-w-[84px]">{currentLineLabel}</span>
+              <span className="truncate max-w-[70px]">{currentLineLabel}</span>
             </button>
 
             <button

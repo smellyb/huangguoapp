@@ -58,6 +58,7 @@ import {
   isEpisodeWarmed,
   preloadNextEpisode,
 } from '../services/preloadManager';
+import Media3Player, { isNativeMedia3Available } from '../plugins/media3Player';
 import type {
   CdnAuthConfig,
   Drama,
@@ -575,6 +576,9 @@ export function TheaterPlayer({
     }
   }, [apiBaseUrl, drama.id, episode, retryToken]);
 
+  // Native Media3 (AndroidX ExoPlayer) Availability Check
+  const useNativeMedia3 = useMemo(() => isNativeMedia3Available(), []);
+
   // Fullscreen & Landscape Cinema Modes
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
@@ -931,8 +935,11 @@ export function TheaterPlayer({
     const idx = PLAYBACK_RATES.indexOf(playbackRate);
     const nextRate = PLAYBACK_RATES[(idx + 1) % PLAYBACK_RATES.length];
     setPlaybackRate(nextRate);
+    if (useNativeMedia3) {
+      Media3Player.setSpeed({ speed: nextRate }).catch(() => null);
+    }
     onNotify(`播放倍速：${nextRate}x`);
-  }, [playbackRate, onNotify]);
+  }, [playbackRate, onNotify, useNativeMedia3]);
 
   useEffect(() => {
     currentTimeRef.current = currentTime;
@@ -1024,9 +1031,122 @@ export function TheaterPlayer({
     }
   }, [drama.id, dramas, episode.number, onNotify, onSelectDramaEpisode]);
 
-  // HLS / MP4 playback lifecycle
+  // Native Media3 (AndroidX ExoPlayer) playback lifecycle for hardware-accelerated playback
   useEffect(() => {
-    if (!hasExternalStream) return;
+    if (!useNativeMedia3 || !hasExternalStream) return;
+    const streamUrl = activeHlsUrl || episode.videoUrl;
+    if (!streamUrl) return;
+
+    const headers: Record<string, string> = {};
+    const cdn = activeCdn || episode.cdn;
+    if (cdn?.authKey && cdn.authValue) {
+      headers[cdn.authKey] = cdn.authValue;
+    }
+    if (cdn?.app) {
+      headers['x-cdn-app'] = cdn.app;
+    }
+
+    let active = true;
+
+    Media3Player.initPlayer({
+      streamUrl,
+      autoPlay: isPlaying,
+      startSeconds: initialTimeSeconds > 0 ? initialTimeSeconds : 0,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+    }).catch((err) => {
+      if (active) {
+        console.warn('[TheaterPlayer] Media3 init failed:', err);
+      }
+    });
+
+    const subState = Media3Player.addListener('playbackStateChanged', (ev) => {
+      if (!active) return;
+      if (ev.state === 'buffering') {
+        setIsBuffering(true);
+      } else if (ev.state === 'ready') {
+        setIsBuffering(false);
+        setVideoReady(true);
+        setStreamError(null);
+      } else if (ev.state === 'ended') {
+        setIsPlaying(false);
+        if (autoAdvance) {
+          handleNextEpisodeOrDrama();
+        }
+      }
+    });
+
+    const subPlay = Media3Player.addListener('isPlayingChanged', (ev) => {
+      if (!active) return;
+      setIsPlaying(ev.isPlaying);
+    });
+
+    const subTime = Media3Player.addListener('timeUpdate', (ev) => {
+      if (!active) return;
+      setCurrentTime(ev.currentTime);
+      currentTimeRef.current = ev.currentTime;
+      if (ev.duration > 0) {
+        setDuration(ev.duration);
+        setBufferedRatio(ev.bufferedPosition / ev.duration);
+      }
+      onRecordProgress(
+        drama.id,
+        episode.number,
+        ev.currentTime,
+        ev.duration || episode.durationSeconds,
+        false
+      );
+    });
+
+    const subSize = Media3Player.addListener('videoSizeChanged', (ev) => {
+      if (!active) return;
+      if (ev.width > 0 && ev.height > 0) {
+        setMediaAspectRatio(ev.width / ev.height);
+      }
+    });
+
+    const subErr = Media3Player.addListener('playerError', (ev) => {
+      if (!active) return;
+      setIsBuffering(false);
+      setStreamError(`原生播放异常（${ev.message}），建议切换其他线路。`);
+    });
+
+    return () => {
+      active = false;
+      subState.then((h) => h.remove());
+      subPlay.then((h) => h.remove());
+      subTime.then((h) => h.remove());
+      subSize.then((h) => h.remove());
+      subErr.then((h) => h.remove());
+    };
+  }, [
+    useNativeMedia3,
+    hasExternalStream,
+    activeHlsUrl,
+    episode.videoUrl,
+    activeCdn,
+    episode.cdn,
+    drama.id,
+    episode.number,
+    episode.durationSeconds,
+    initialTimeSeconds,
+    autoAdvance,
+    handleNextEpisodeOrDrama,
+    onRecordProgress,
+    retryToken,
+  ]);
+
+  // Cleanup native player on unmount
+  useEffect(() => {
+    return () => {
+      if (useNativeMedia3) {
+        Media3Player.destroy().catch(() => null);
+      }
+    };
+  }, [useNativeMedia3]);
+
+  // HLS / MP4 playback lifecycle (Web / Hls.js fallback)
+  useEffect(() => {
+    if (!hasExternalStream || useNativeMedia3) return;
     const video = videoRef.current;
     if (!video) return;
 
@@ -1172,8 +1292,18 @@ export function TheaterPlayer({
   }, [preferredQuality]);
 
   useEffect(() => {
-    if (!hasExternalStream || !videoRef.current) return;
+    if (!hasExternalStream) return;
+    if (useNativeMedia3) {
+      if (isPlaying) {
+        Media3Player.play().catch(() => setIsPlaying(false));
+      } else {
+        Media3Player.pause().catch(() => null);
+      }
+      Media3Player.setSpeed({ speed: isSpeedBoosting ? 2.0 : playbackRate }).catch(() => null);
+      return;
+    }
     const video = videoRef.current;
+    if (!video) return;
     video.playbackRate = isSpeedBoosting ? 2.0 : playbackRate;
     video.muted = isMuted;
     if (isPlaying) {
@@ -1181,7 +1311,7 @@ export function TheaterPlayer({
     } else {
       video.pause();
     }
-  }, [hasExternalStream, isPlaying, playbackRate, isMuted, isSpeedBoosting]);
+  }, [hasExternalStream, isPlaying, playbackRate, isMuted, isSpeedBoosting, useNativeMedia3]);
 
   // Built-in GPU storyboard playback clock
   useEffect(() => {
@@ -1225,19 +1355,27 @@ export function TheaterPlayer({
     (seconds: number) => {
       setCurrentTime(seconds);
       currentTimeRef.current = seconds;
-      if (hasExternalStream && videoRef.current) {
+      if (useNativeMedia3) {
+        Media3Player.seekTo({ seconds }).catch(() => null);
+      } else if (hasExternalStream && videoRef.current) {
         videoRef.current.currentTime = seconds;
       }
       onRecordProgress(drama.id, episode.number, seconds, duration, true);
       pokeHud();
     },
-    [drama.id, duration, episode.number, hasExternalStream, onRecordProgress, pokeHud]
+    [drama.id, duration, episode.number, hasExternalStream, onRecordProgress, pokeHud, useNativeMedia3]
   );
 
   const togglePlayPause = useCallback(() => {
     setIsPlaying((prev) => {
       const next = !prev;
-      if (!next) {
+      if (useNativeMedia3) {
+        if (next) {
+          Media3Player.play().catch(() => null);
+        } else {
+          Media3Player.pause().catch(() => null);
+        }
+      } else if (!next) {
         onRecordProgress(
           drama.id,
           episode.number,
@@ -1249,7 +1387,7 @@ export function TheaterPlayer({
       return next;
     });
     pokeHud();
-  }, [drama.id, duration, episode.number, onRecordProgress, pokeHud]);
+  }, [drama.id, duration, episode.number, onRecordProgress, pokeHud, useNativeMedia3]);
 
   // Desktop keyboard shortcuts
   useEffect(() => {
@@ -1415,7 +1553,9 @@ export function TheaterPlayer({
       if (gestureTypeRef.current === 'none' && touchStartRef.current) {
         gestureTypeRef.current = 'long_press';
         setIsSpeedBoosting(true);
-        if (videoRef.current) {
+        if (useNativeMedia3) {
+          Media3Player.setSpeed({ speed: 2.0 }).catch(() => null);
+        } else if (videoRef.current) {
           videoRef.current.playbackRate = 2.0;
         }
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -1487,7 +1627,10 @@ export function TheaterPlayer({
       );
       setVolume(nextV);
       setIsAdjustingVolume(true);
-      if (videoRef.current) {
+      if (useNativeMedia3) {
+        Media3Player.setVolume({ volume: nextV }).catch(() => null);
+        if (nextV > 0 && isMuted) setIsMuted(false);
+      } else if (videoRef.current) {
         videoRef.current.volume = nextV;
         if (nextV > 0 && isMuted) setIsMuted(false);
       }
@@ -1513,7 +1656,9 @@ export function TheaterPlayer({
 
     if (gType === 'long_press') {
       setIsSpeedBoosting(false);
-      if (videoRef.current) {
+      if (useNativeMedia3) {
+        Media3Player.setSpeed({ speed: playbackRate }).catch(() => null);
+      } else if (videoRef.current) {
         videoRef.current.playbackRate = playbackRate;
       }
       gestureTypeRef.current = 'none';
@@ -1725,15 +1870,16 @@ export function TheaterPlayer({
   const mediaFitClass = effectiveFit === 'contain' ? 'object-contain' : 'object-cover';
 
   // Full 100dvh on portrait mobile (no bottom nav fighting for space!); spacious cinema stage on desktop
+  const stageBg = useNativeMedia3 ? 'bg-transparent' : 'bg-black';
   const stageContainerClass = isRotatedMobileLandscape
-    ? 'fixed top-1/2 left-1/2 z-50 w-[100dvh] h-[100vw] -translate-x-1/2 -translate-y-1/2 rotate-90 origin-center rounded-none border-0 bg-black'
+    ? `fixed top-1/2 left-1/2 z-50 w-[100dvh] h-[100vw] -translate-x-1/2 -translate-y-1/2 rotate-90 origin-center rounded-none border-0 ${stageBg}`
     : isFullscreen
-      ? 'fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 bg-black'
+      ? `fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 ${stageBg}`
       : isDeviceLandscape
-        ? 'fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 bg-black'
+        ? `fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 ${stageBg}`
         : isLandscape
-          ? 'relative w-full aspect-video max-h-[78dvh] rounded-2xl lg:rounded-3xl bg-black border border-white/[0.1]'
-          : 'relative w-full h-[100dvh] md:h-[calc(100dvh-96px)] lg:h-[calc(100dvh-116px)] lg:max-h-[820px] lg:w-[430px] xl:w-[460px] lg:rounded-3xl bg-black border-0 lg:border lg:border-white/[0.1] shrink-0';
+          ? `relative w-full aspect-video max-h-[78dvh] rounded-2xl lg:rounded-3xl ${stageBg} border border-white/[0.1]`
+          : `relative w-full h-[100dvh] md:h-[calc(100dvh-96px)] lg:h-[calc(100dvh-116px)] lg:max-h-[820px] lg:w-[430px] xl:w-[460px] lg:rounded-3xl ${stageBg} border-0 lg:border lg:border-white/[0.1] shrink-0`;
 
   const showSideEpisodeDrawer = isFullscreen || effectiveLandscape;
   const isControlsVisible = !isCleanMode && hudVisible;
@@ -1848,22 +1994,30 @@ export function TheaterPlayer({
                   preload="auto"
                   poster={resolvedPosterUrl || undefined}
                   onLoadedMetadata={(e) => {
+                    if (useNativeMedia3) return;
                     const dur = e.currentTarget.duration;
                     if (Number.isFinite(dur) && dur > 0) setDuration(dur);
                     syncVideoAspectRatio(e.currentTarget);
                   }}
                   onResize={(e) => {
+                    if (useNativeMedia3) return;
                     syncVideoAspectRatio(e.currentTarget);
                   }}
                   onPlaying={(e) => {
+                    if (useNativeMedia3) return;
                     syncVideoAspectRatio(e.currentTarget);
                     setVideoReady(true);
                     setIsBuffering(false);
                     setStreamError(null);
                   }}
-                  onWaiting={() => setIsBuffering(true)}
-                  onStalled={() => setIsBuffering(true)}
+                  onWaiting={() => {
+                    if (!useNativeMedia3) setIsBuffering(true);
+                  }}
+                  onStalled={() => {
+                    if (!useNativeMedia3) setIsBuffering(true);
+                  }}
                   onTimeUpdate={(e) => {
+                    if (useNativeMedia3) return;
                     const v = e.currentTarget;
                     setCurrentTime(v.currentTime);
                     if (v.buffered.length > 0 && v.duration > 0) {
@@ -1880,6 +2034,7 @@ export function TheaterPlayer({
                     );
                   }}
                   onEnded={() => {
+                    if (useNativeMedia3) return;
                     onRecordProgress(drama.id, episode.number, duration, duration, true);
                     if (autoAdvance) {
                       handleNextEpisodeOrDrama();
@@ -1888,12 +2043,17 @@ export function TheaterPlayer({
                     }
                   }}
                   onError={() => {
+                    if (useNativeMedia3) return;
                     setIsBuffering(false);
                     setStreamError('片源流暂时无法播放，建议切换其他极速线路或使用剧照预览。');
                   }}
-                  className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
-                    videoReady ? 'opacity-100' : 'opacity-0'
-                  }`}
+                  className={
+                    useNativeMedia3
+                      ? 'opacity-0 pointer-events-none w-full h-full'
+                      : `absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
+                          videoReady ? 'opacity-100' : 'opacity-0'
+                        }`
+                  }
                 />
               ) : (
                 /* Mode B: Storyboard Preview Engine */

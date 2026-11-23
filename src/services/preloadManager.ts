@@ -1,5 +1,6 @@
 import type { Episode } from '../types/drama';
 import { fetchEpisodePlayback } from './dramaApi';
+import Media3Player, { isNativeMedia3Available } from '../plugins/media3Player';
 
 const warmedKeys = new Set<string>();
 const activeControllers = new Map<string, AbortController>();
@@ -137,6 +138,9 @@ export async function preloadNextEpisode(
 
     // 3. Warm HLS stream playlist + first segment
     if (nextEpisode.hlsUrl) {
+      if (isNativeMedia3Available()) {
+        Media3Player.preload({ streamUrl: nextEpisode.hlsUrl }).catch(() => null);
+      }
       await warmHlsStream(nextEpisode.hlsUrl, nextEpisode.cdn, controller.signal);
       warmedKeys.add(key);
       return;
@@ -144,6 +148,9 @@ export async function preloadNextEpisode(
 
     // 4. Warm MP4 direct stream first 512KB
     if (nextEpisode.videoUrl) {
+      if (isNativeMedia3Available()) {
+        Media3Player.preload({ streamUrl: nextEpisode.videoUrl }).catch(() => null);
+      }
       await fetch(nextEpisode.videoUrl, {
         method: 'GET',
         headers: { Range: 'bytes=0-524287' },

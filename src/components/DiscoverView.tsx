@@ -10,7 +10,7 @@ import {
   Tag,
   X,
 } from 'lucide-react';
-import { deriveRankings, fetchOfficialTags } from '../services/dramaApi';
+import { deriveRankings, fetchDramasByTag, fetchOfficialTags } from '../services/dramaApi';
 import {
   POPULAR_TAGS,
   type Drama,
@@ -31,11 +31,14 @@ interface DiscoverViewProps {
   warning?: string;
   selectedCategory?: string;
   onSelectCategory?: (category: string) => void;
+  selectedTag?: string;
+  onSelectTag?: (tag: string) => void;
   onPlayDrama: (drama: Drama, episodeNumber?: number, startSeconds?: number) => void;
   onToggleFollow?: (dramaId: string) => void;
   onOpenLineSelector?: () => void;
   onPushHistoryLayer?: (layer: string) => void;
   overlayBackHandlerRef?: MutableRefObject<(() => boolean) | null>;
+  apiBaseUrl?: string;
 }
 
 const CHANNEL_TABS = [
@@ -64,14 +67,21 @@ export function DiscoverView({
   warning,
   selectedCategory,
   onSelectCategory,
+  selectedTag,
+  onSelectTag,
   onPlayDrama,
   onToggleFollow: _onToggleFollow,
   onOpenLineSelector,
   onPushHistoryLayer,
   overlayBackHandlerRef,
+  apiBaseUrl,
 }: DiscoverViewProps) {
   const [activeChannel, setActiveChannel] = useState<string>(selectedCategory || '全部');
-  const [selectedGenre, setSelectedGenre] = useState<string>('全部');
+  const [selectedGenre, setSelectedGenre] = useState<string>(selectedTag || '全部');
+  const [tagRemoteDramas, setTagRemoteDramas] = useState<Drama[]>([]);
+  const [tagTotalCount, setTagTotalCount] = useState<number | undefined>();
+  const [tagIntro, setTagIntro] = useState<string | undefined>();
+  const [isTagLoading, setIsTagLoading] = useState(false);
   const [sortMode, setSortMode] = useState<'latest' | 'hot' | 'recommended'>('latest');
   const [rankingTab, setRankingTab] = useState<RankingType>('hot');
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
@@ -119,6 +129,60 @@ export function DiscoverView({
       }
     }
   }, [selectedCategory, activeChannel]);
+
+  useEffect(() => {
+    if (selectedTag && selectedTag !== selectedGenre) {
+      setSelectedGenre(selectedTag);
+    }
+  }, [selectedTag, selectedGenre]);
+
+  const handleSelectGenre = (tag: string) => {
+    const next = selectedGenre === tag ? '全部' : tag;
+    setSelectedGenre(next);
+    onSelectTag?.(next);
+  };
+
+  // Dynamically load real dramas from huangguoai.com for selected tag
+  useEffect(() => {
+    if (selectedGenre === '全部') {
+      setTagRemoteDramas([]);
+      setTagTotalCount(undefined);
+      setTagIntro(undefined);
+      setIsTagLoading(false);
+      return;
+    }
+
+    let active = true;
+    setIsTagLoading(true);
+
+    fetchDramasByTag(apiBaseUrl || '', selectedGenre)
+      .then((res) => {
+        if (!active) return;
+        if (res && res.dramas.length > 0) {
+          setTagRemoteDramas(res.dramas);
+          setTagTotalCount(res.totalCount);
+          setTagIntro(res.intro);
+        } else {
+          setTagRemoteDramas([]);
+          setTagTotalCount(undefined);
+          setTagIntro(undefined);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setTagRemoteDramas([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsTagLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl, selectedGenre]);
 
   const handleSelectChannel = (channel: string) => {
     setActiveChannel(channel);
@@ -190,19 +254,23 @@ export function DiscoverView({
     }
 
     if (selectedGenre !== '全部') {
-      const target = selectedGenre.toLowerCase();
-      list = list.filter(
-        (d) =>
-          d.genres.some((genre) => genre.toLowerCase() === target) ||
-          d.category.toLowerCase() === target ||
-          d.title.toLowerCase().includes(target) ||
-          d.tagline.toLowerCase().includes(target) ||
-          d.synopsis.toLowerCase().includes(target)
-      );
+      if (tagRemoteDramas.length > 0) {
+        list = tagRemoteDramas;
+      } else {
+        const target = selectedGenre.toLowerCase();
+        list = list.filter(
+          (d) =>
+            d.genres.some((genre) => genre.toLowerCase() === target) ||
+            d.category.toLowerCase() === target ||
+            d.title.toLowerCase().includes(target) ||
+            d.tagline.toLowerCase().includes(target) ||
+            d.synopsis.toLowerCase().includes(target)
+        );
+      }
     }
 
     return list;
-  }, [dramas, activeChannel, channelSubFilter, selectedGenre, selectedTopic]);
+  }, [dramas, activeChannel, channelSubFilter, selectedGenre, selectedTopic, tagRemoteDramas]);
 
   const sortedDramas = useMemo(() => {
     const list = [...filteredDramas];
@@ -452,14 +520,14 @@ export function DiscoverView({
         <section aria-label="热门标签与题材筛选" className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="w-1 h-3.5 rounded-full bg-amber-400" />
+              <span className="w-1 h-3.5 rounded-full bg-[#ffd21c]" />
               <h2 className="text-sm font-bold text-white tracking-wide">热门标签</h2>
               {selectedGenre !== '全部' && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-400/15 text-amber-300 border border-amber-400/30">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#ffd21c]/15 text-[#ffd21c] border border-[#ffd21c]/30">
                   当前：{selectedGenre}
                   <button
                     type="button"
-                    onClick={() => setSelectedGenre('全部')}
+                    onClick={() => handleSelectGenre('全部')}
                     aria-label="清除筛选"
                     className="hover:text-white ml-0.5"
                   >
@@ -487,11 +555,14 @@ export function DiscoverView({
             </button>
           </div>
 
-          {/* 20 Official Popular Tags Strip */}
+          {/* 20 Official Popular Tags Strip with exact huangguoai.com gradient pills & fade overlays */}
           <div className="relative group">
+            <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-5 bg-gradient-to-r from-[#0B0C10] to-transparent z-10" />
+            <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-5 bg-gradient-to-l from-[#0B0C10] to-transparent z-10" />
+
             <div
               ref={tagScrollRef}
-              className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth -mx-3.5 px-3.5 sm:mx-0 sm:px-0 py-1"
+              className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth -mx-3.5 px-3.5 sm:mx-0 sm:px-0 py-1"
             >
               {POPULAR_TAGS.map((tag) => {
                 const active = selectedGenre === tag;
@@ -499,11 +570,11 @@ export function DiscoverView({
                   <button
                     key={tag}
                     type="button"
-                    onClick={() => setSelectedGenre(tag)}
-                    className={`min-h-[34px] px-3.5 rounded-lg text-xs font-medium whitespace-nowrap shrink-0 transition-all ${
+                    onClick={() => handleSelectGenre(tag)}
+                    className={`h-8 px-4 rounded-full text-xs sm:text-[13px] font-medium whitespace-nowrap shrink-0 transition-all active:scale-95 flex items-center justify-center ${
                       active
-                        ? 'bg-amber-400 text-[#0B0C10] font-bold shadow-md shadow-amber-500/20'
-                        : 'bg-[#14161D] border border-white/[0.06] text-slate-300 hover:text-white hover:bg-[#1D202A]'
+                        ? 'bg-[#ffd21c]/15 border border-[#ffd21c]/70 text-[#ffd21c] font-semibold shadow-[0_0_12px_rgba(255,210,28,0.25)]'
+                        : 'bg-gradient-to-r from-white/10 to-white/5 border border-white/10 text-white/80 hover:text-white hover:border-white/25 hover:bg-white/15'
                     }`}
                   >
                     {tag}
@@ -513,12 +584,53 @@ export function DiscoverView({
             </div>
           </div>
 
+          {/* Official Tag Landing View (完全对齐 huangguoai.com /tag/<slug>/ 官方页面) */}
+          {selectedGenre !== '全部' && (
+            <div className="rounded-2xl bg-gradient-to-br from-[#14161D] via-[#1A1D27] to-[#12141A] border border-white/[0.08] p-4 sm:p-5 space-y-2.5">
+              {/* Breadcrumb */}
+              <nav aria-label="面包屑" className="flex items-center gap-1.5 text-xs text-slate-400">
+                <button
+                  type="button"
+                  onClick={() => handleSelectGenre('全部')}
+                  className="hover:text-amber-400 transition-colors"
+                >
+                  首页
+                </button>
+                <span className="text-slate-600">/</span>
+                <span className="text-[#ffd21c] font-medium">{selectedGenre}</span>
+              </nav>
+
+              {/* Tag Header & Clear */}
+              <div className="flex items-center justify-between gap-2">
+                <h1 className="text-base sm:text-xl font-bold text-white tracking-tight">
+                  {selectedGenre}短剧在线观看
+                </h1>
+                <button
+                  type="button"
+                  onClick={() => handleSelectGenre('全部')}
+                  className="h-7 px-2.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] text-slate-300 hover:text-white text-xs font-medium inline-flex items-center gap-1 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>清除标签</span>
+                </button>
+              </div>
+
+              {/* Tag Intro */}
+              <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+                {tagIntro ||
+                  `精选${selectedGenre}题材相关AI成人短剧与AI成人漫剧，持续更新${selectedGenre}题材作品，方便快速浏览相关短剧。`}
+              </p>
+            </div>
+          )}
+
           {/* Section Heading & Sort Bar */}
           <div className="flex items-center justify-between pt-1">
             <div className="flex items-center gap-2">
-              <span className="w-1 h-3.5 rounded-full bg-amber-400" />
+              <span className="w-1 h-3.5 rounded-full bg-[#ffd21c]" />
               <h2 className="text-sm sm:text-base font-bold text-white">
-                {activeChannel === '短剧'
+                {selectedGenre !== '全部'
+                  ? `全部${selectedGenre}短剧 · 共 ${tagTotalCount || sortedDramas.length} 部`
+                  : activeChannel === '短剧'
                   ? channelSubFilter === 'hot'
                     ? '当前热播的AI成人短剧'
                     : channelSubFilter === 'recommended'
@@ -532,11 +644,17 @@ export function DiscoverView({
                     : '最新更新的AI成人漫剧'
                   : activeChannel === '黄果原创'
                   ? '精选独家原创短剧与漫剧'
-                  : selectedGenre !== '全部'
-                  ? `【${selectedGenre}】题材短剧`
                   : '最新更新短剧'}
               </h2>
-              <span className="text-xs text-slate-500 font-mono">共 {sortedDramas.length} 部</span>
+              {isTagLoading ? (
+                <span className="text-xs text-amber-400/80 animate-pulse font-normal">
+                  同步中...
+                </span>
+              ) : (
+                <span className="text-xs text-slate-500 font-mono">
+                  共 {sortedDramas.length} 部
+                </span>
+              )}
             </div>
 
             {/* Compact Sort Segmented Control */}
@@ -575,7 +693,7 @@ export function DiscoverView({
                 type="button"
                 onClick={() => {
                   handleSelectChannel('全部');
-                  setSelectedGenre('全部');
+                  handleSelectGenre('全部');
                 }}
                 className="min-h-[44px] px-5 rounded-xl bg-amber-500 text-[#0B0C10] text-sm font-semibold hover:bg-amber-400 transition-colors"
               >
@@ -589,6 +707,7 @@ export function DiscoverView({
                   key={drama.id}
                   drama={drama}
                   onSelect={(item) => onPlayDrama(item)}
+                  onSelectTag={(tag) => handleSelectGenre(tag)}
                 />
               ))}
             </div>
@@ -856,7 +975,7 @@ export function DiscoverView({
                             key={`${t.id}-${t.name}`}
                             type="button"
                             onClick={() => {
-                              setSelectedGenre(t.name);
+                              handleSelectGenre(t.name);
                               setShowGenreSheet(false);
                             }}
                             className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
@@ -879,7 +998,7 @@ export function DiscoverView({
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedGenre('全部');
+                        handleSelectGenre('全部');
                         setShowGenreSheet(false);
                       }}
                       className="text-amber-400 hover:text-amber-300 font-medium"
@@ -895,7 +1014,7 @@ export function DiscoverView({
                           key={tag}
                           type="button"
                           onClick={() => {
-                            setSelectedGenre(tag);
+                            handleSelectGenre(tag);
                             setShowGenreSheet(false);
                           }}
                           className={`min-h-[40px] px-2 rounded-xl text-xs font-medium transition-colors truncate flex items-center justify-center gap-1 ${
@@ -925,7 +1044,7 @@ export function DiscoverView({
                             <button
                               type="button"
                               onClick={() => {
-                                setSelectedGenre('全部');
+                                handleSelectGenre('全部');
                                 setShowGenreSheet(false);
                               }}
                               className="text-amber-400 hover:text-amber-300 font-medium"
@@ -942,7 +1061,7 @@ export function DiscoverView({
                                 key={t.id}
                                 type="button"
                                 onClick={() => {
-                                  setSelectedGenre(t.name);
+                                  handleSelectGenre(t.name);
                                   setShowGenreSheet(false);
                                 }}
                                 className={`min-h-[40px] px-2.5 rounded-xl text-xs font-medium transition-all truncate flex items-center justify-center gap-1 ${
@@ -970,7 +1089,7 @@ export function DiscoverView({
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedGenre('全部');
+                  handleSelectGenre('全部');
                   setShowGenreSheet(false);
                 }}
                 className="min-h-[40px] px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-slate-300 transition-colors"

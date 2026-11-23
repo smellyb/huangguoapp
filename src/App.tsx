@@ -71,6 +71,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('discover');
   const [returnTab, setReturnTab] = useState<AppTab>('discover');
   const [selectedCategory, setSelectedCategory] = useState<string>('全部');
+  const [selectedTag, setSelectedTag] = useState<string>('全部');
   const [dramas, setDramas] = useState<Drama[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [dataSource, setDataSource] = useState<'demo' | 'custom'>('custom');
@@ -306,6 +307,12 @@ export default function App() {
     [showToast, toggleLikeEpisode]
   );
 
+  const handleSelectTag = useCallback((tag: string) => {
+    setSelectedTag(tag);
+    setActiveTab('discover');
+    window.scrollTo({ top: 0 });
+  }, []);
+
   const latestWatched = state.watchHistory[0];
 
   const handleEnterTheaterQuick = useCallback(() => {
@@ -457,6 +464,11 @@ export default function App() {
             warning={catalogWarning}
             selectedCategory={selectedCategory}
             onSelectCategory={setSelectedCategory}
+            selectedTag={selectedTag}
+            onSelectTag={handleSelectTag}
+            apiBaseUrl={
+              state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : undefined
+            }
             onPlayDrama={(drama, ep, sec) => openTheater(drama, ep, sec)}
             onToggleFollow={handleToggleFollow}
             onOpenLineSelector={openLineModal}
@@ -483,6 +495,7 @@ export default function App() {
             overlayBackHandlerRef={overlayBackHandlerRef}
             onChangeQuality={(quality) => updateApiConfig({ preferredQuality: quality })}
             onSelectDramaEpisode={handleSelectDramaEpisode}
+            onSelectTag={handleSelectTag}
             onToggleFollow={handleToggleFollow}
             onToggleLike={handleToggleLike}
             onRecordProgress={recordProgress}
@@ -503,6 +516,7 @@ export default function App() {
             onRemoveSearchTerm={removeSearchTerm}
             onClearSearchHistory={clearSearchHistory}
             onPlayDrama={(drama) => openTheater(drama)}
+            onSelectTag={handleSelectTag}
           />
         )}
 

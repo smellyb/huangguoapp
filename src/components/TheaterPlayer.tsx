@@ -308,6 +308,7 @@ interface EpisodePanelProps {
   watchedMaxEpisode: number;
   onSelectEpisode: (epNum: number) => void;
   onClose?: () => void;
+  onSelectTag?: (tag: string) => void;
 }
 
 const EpisodeSelectorGrid = memo(function EpisodeSelectorGrid({
@@ -449,6 +450,7 @@ interface TheaterPlayerProps {
     episodeNumber: number,
     resumeAt?: number
   ) => void;
+  onSelectTag?: (tag: string) => void;
   onToggleFollow: (dramaId: string) => void;
   onToggleLike: (dramaId: string, episodeNumber: number) => void;
   onRecordProgress: (
@@ -477,6 +479,7 @@ export function TheaterPlayer({
   overlayBackHandlerRef,
   onChangeQuality,
   onSelectDramaEpisode,
+  onSelectTag,
   onToggleFollow,
   onToggleLike,
   onRecordProgress,
@@ -2311,16 +2314,27 @@ export function TheaterPlayer({
                 <p className="text-xs sm:text-sm text-white/95 line-clamp-2 leading-snug drop-shadow">
                   {episode.hook || drama.tagline}
                 </p>
-                <p className="text-[11px] text-slate-300/90 drop-shadow">
-                  {drama.category} <span aria-hidden="true">·</span>{' '}
-                  {drama.genres.slice(0, 2).join(' / ')}
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-300/90 pointer-events-auto drop-shadow pt-0.5">
+                  <span className="text-amber-300 font-medium">{drama.category}</span>
+                  {drama.genres.slice(0, 3).map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectTag?.(tag);
+                        onExitTheater?.();
+                      }}
+                      title={`查看 ${tag} 短剧`}
+                      className="hg-tag px-1.5 py-0.2 rounded-[3px] text-[10px] font-normal leading-[13px] bg-[#ffd21c]/15 text-[#ffd21c] border border-[#ffd21c]/30 hover:bg-[#ffd21c]/25 hover:border-[#ffd21c]/60 transition-colors"
+                    >
+                      {tag}
+                    </button>
+                  ))}
                   {nextEpisode && preloadTriggered && (
-                    <>
-                      {' '}
-                      <span aria-hidden="true">·</span> 下集已就绪
-                    </>
+                    <span className="text-emerald-400 text-[10px] ml-1">· 下集已就绪</span>
                   )}
-                </p>
+                </div>
               </div>
             )}
 
@@ -2747,11 +2761,29 @@ export function TheaterPlayer({
                   <h2 className="text-xl font-bold text-white truncate">
                     {drama.title}
                   </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {drama.category} <span aria-hidden="true">·</span>{' '}
-                    {drama.genres.join(' / ')} <span aria-hidden="true">·</span>{' '}
-                    {drama.releaseYear}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                    <span className="px-1.5 py-0.5 rounded-[3px] text-[10px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                      {drama.category}
+                    </span>
+                    {drama.genres.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          onSelectTag?.(tag);
+                          onExitTheater?.();
+                        }}
+                        className="hg-tag px-2 py-0.5 rounded-[3px] text-[10px] font-normal leading-[15px] bg-[#ffd21c]/10 text-[#ffd21c] border border-[#ffd21c]/25 hover:bg-[#ffd21c]/20 hover:border-[#ffd21c]/50 transition-colors"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                    {drama.releaseYear && (
+                      <span className="text-[11px] text-slate-500 font-mono ml-0.5">
+                        · {drama.releaseYear}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <button
                   type="button"

@@ -154,6 +154,7 @@ export function DramaCoverImage({
 interface DramaPosterProps {
   drama: Drama;
   onSelect: (drama: Drama) => void;
+  onSelectTag?: (tag: string) => void;
   subtitle?: string;
   compact?: boolean;
 }
@@ -161,14 +162,22 @@ interface DramaPosterProps {
 export function DramaPoster({
   drama,
   onSelect,
+  onSelectTag,
   subtitle,
   compact = false,
 }: DramaPosterProps) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(drama)}
-      className="group text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded-2xl transition-transform duration-200 active:scale-[0.98]"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(drama);
+        }
+      }}
+      className="group cursor-pointer text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded-2xl transition-transform duration-200 active:scale-[0.98]"
     >
       <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl bg-[#14161D] border border-white/[0.08]">
         <DramaCoverImage
@@ -183,20 +192,46 @@ export function DramaPoster({
 
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent pointer-events-none" />
 
+        {/* Top Badges (原创, 新片) exactly as on huangguoai.com */}
+        <div className="absolute top-2 left-2 flex items-center gap-1 z-10 pointer-events-none">
+          {(drama.studio?.includes('原创') || drama.category === '黄果原创') && (
+            <span className="px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-[#ffd21c] text-[#0d0d0d] shadow-sm">
+              原创
+            </span>
+          )}
+          {drama.isNew && (
+            <span className="px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-rose-500 text-white shadow-sm">
+              新片
+            </span>
+          )}
+        </div>
+
+        {/* Score Badge at bottom-right matching official .hg-drama-card__score */}
+        {Boolean(drama.rating) && (
+          <div className="absolute bottom-0 right-0 z-10 pointer-events-none">
+            <span className="px-2 py-0.5 rounded-tl-lg bg-gradient-to-r from-[#ffd21c] to-[#ffb800] text-[#0d0d0d] text-[11px] font-extrabold tracking-tight shadow-sm font-mono">
+              {drama.rating!.toFixed(1)}分
+            </span>
+          </div>
+        )}
+
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
           <span className="w-11 h-11 rounded-full bg-amber-500/95 text-[#0B0C10] flex items-center justify-center shadow-lg">
             <Play className="w-5 h-5 fill-current ml-0.5" aria-hidden="true" />
           </span>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 p-3 space-y-1 pointer-events-none">
-          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-200/90 font-mono tabular-nums">
-            <span className="truncate">
+        {/* Episode count & views matching official layout */}
+        <div className="absolute inset-x-0 bottom-0 p-2.5 pb-2 pointer-events-none">
+          <div className="flex items-center gap-1 text-[11px] text-slate-200/95 font-medium tabular-nums drop-shadow">
+            <span>
               {drama.status === '已完结'
                 ? `全 ${drama.totalEpisodes} 集`
-                : `更至 ${drama.updatedEpisodes} 集`}
+                : `更新至${drama.updatedEpisodes || drama.totalEpisodes}集`}
             </span>
-            <span className="shrink-0 text-amber-300">{drama.playCountLabel}</span>
+            {drama.playCountLabel && (
+              <span className="text-amber-300/90 text-[10px]">· {drama.playCountLabel}</span>
+            )}
           </div>
         </div>
       </div>
@@ -208,23 +243,25 @@ export function DramaPoster({
         {subtitle ? (
           <p className="text-xs text-slate-400 line-clamp-1">{subtitle}</p>
         ) : (
-          <div className="flex flex-wrap items-center gap-1 overflow-hidden h-5">
-            {drama.category && drama.category !== '全部' && (
-              <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/25 shrink-0">
-                {drama.category}
-              </span>
-            )}
+          /* Official .hg-drama-card__tags style matching huangguoai.com exactly */
+          <div className="hg-drama-card__tags flex flex-wrap items-center gap-1 overflow-hidden h-5">
             {drama.genres.slice(0, 3).map((tag) => (
-              <span
+              <button
                 key={tag}
-                className="px-1.5 py-0.2 rounded text-[10px] text-slate-400 bg-white/[0.06] shrink-0"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectTag?.(tag);
+                }}
+                title={`查看 ${tag} 短剧`}
+                className="hg-tag px-1.5 py-0.5 rounded-[3px] text-[10px] font-normal leading-[14px] bg-[#ffd21c]/10 text-[#ffd21c] border border-[#ffd21c]/25 hover:bg-[#ffd21c]/25 hover:border-[#ffd21c]/50 transition-colors shrink-0"
               >
                 {tag}
-              </span>
+              </button>
             ))}
           </div>
         )}
       </div>
-    </button>
+    </div>
   );
 }

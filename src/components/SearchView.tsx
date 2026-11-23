@@ -7,6 +7,7 @@ import {
   searchRemoteDramas,
 } from '../services/dramaApi';
 import type { Drama } from '../types/drama';
+import { POPULAR_TAGS } from '../types/drama';
 import { DramaPoster } from './DramaPoster';
 
 interface SearchViewProps {
@@ -18,6 +19,7 @@ interface SearchViewProps {
   onRemoveSearchTerm: (term: string) => void;
   onClearSearchHistory: () => void;
   onPlayDrama: (drama: Drama) => void;
+  onSelectTag?: (tag: string) => void;
 }
 
 export function SearchView({
@@ -29,6 +31,7 @@ export function SearchView({
   onRemoveSearchTerm,
   onClearSearchHistory,
   onPlayDrama,
+  onSelectTag,
 }: SearchViewProps) {
   const [query, setQuery] = useState('');
   const [hotKeywords, setHotKeywords] = useState<string[]>(HOT_SEARCH_TERMS);
@@ -228,6 +231,13 @@ export function SearchView({
                       onAddSearchTerm(query.trim());
                       onPlayDrama(item);
                     }}
+                    onSelectTag={(tag) => {
+                      if (onSelectTag) {
+                        onSelectTag(tag);
+                      } else {
+                        applyKeyword(tag);
+                      }
+                    }}
                   />
                 ))}
               </div>
@@ -309,6 +319,31 @@ export function SearchView({
                     <span className="truncate">{term}</span>
                   </button>
                 ))}
+              </div>
+
+              {/* Official Popular Tags Strip in Search View */}
+              <div className="pt-4 space-y-2.5">
+                <h3 className="text-xs sm:text-sm font-semibold text-slate-300">
+                  热门题材标签
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {POPULAR_TAGS.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => {
+                        if (onSelectTag) {
+                          onSelectTag(tag);
+                        } else {
+                          applyKeyword(tag);
+                        }
+                      }}
+                      className="hg-tag h-8 px-3.5 rounded-full text-xs font-medium bg-gradient-to-r from-white/10 to-white/5 border border-white/10 text-white/80 hover:text-[#ffd21c] hover:border-[#ffd21c]/40 hover:bg-[#ffd21c]/10 active:scale-95 transition-all flex items-center justify-center"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
               </div>
             </section>
           </div>

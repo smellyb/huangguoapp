@@ -7,6 +7,7 @@ import type {
   Episode,
   OfficialTagCategory,
   RankingType,
+  TagCatalogResult,
   Topic,
 } from '../types/drama';
 import { POPULAR_TAGS } from '../types/drama';
@@ -284,6 +285,150 @@ function deriveGenres(item: HuangguoVideoItem): DramaGenre[] {
 /**
  * 动态拉取 huangguoai.com 官方全维度 9 大类标签（短剧题材、短剧架空、短剧男频、短剧女频、短剧伦理、成人场景等）
  */
+const TAG_NAME_TO_SLUG: Record<string, string> = {};
+const TAG_SLUG_TO_NAME: Record<string, string> = {};
+
+for (const cat of OFFICIAL_TAGS_FALLBACK as OfficialTagCategory[]) {
+  if (Array.isArray(cat.tags)) {
+    for (const t of cat.tags) {
+      if (t.name && t.slug) {
+        TAG_NAME_TO_SLUG[t.name] = t.slug;
+        TAG_SLUG_TO_NAME[t.slug] = t.name;
+      }
+    }
+  }
+}
+
+export function getTagSlug(tag: string): string {
+  const trimmed = tag.trim();
+  return TAG_NAME_TO_SLUG[trimmed] || trimmed.toLowerCase();
+}
+
+export function getTagNameBySlug(slug: string): string {
+  const trimmed = slug.trim().toLowerCase();
+  return TAG_SLUG_TO_NAME[trimmed] || slug;
+}
+
+export async function fetchDramasByTag(
+  baseUrl: string,
+  tag: string
+): Promise<TagCatalogResult | null> {
+  const activeBase = normalizeBaseUrl(baseUrl || '');
+  if (!activeBase) return null;
+
+  const slug = getTagSlug(tag);
+  const tagName = getTagNameBySlug(slug) || tag;
+  const targetUrl = `${activeBase}/tag/${encodeURIComponent(slug)}/`;
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+
+    if (!res.ok) {
+      return null;
+    }
+
+    const html = await res.text();
+
+    // Parse total count
+    const countMatch = html.match(/全部[^·]+·\s*共\s*(\d+)\s*部/);
+    const totalCount = countMatch ? parseInt(countMatch[1], 10) : undefined;
+
+    // Parse intro text
+    const introMatch = html.match(/class="hg-channel-page__intro">([^<]+)<\/p>/);
+    const intro = introMatch ? introMatch[1].trim() : undefined;
+
+    // Parse card elements
+    const cardRegex =
+      /<div class="hg-drama-card"[^>]*data-track-item-id="([^"]+)"[^>]*data-track-item-name="([^"]+)"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/g;
+    let match: RegExpExecArray | null;
+    const dramas: Drama[] = [];
+    let idx = 0;
+
+    while ((match = cardRegex.exec(html)) !== null) {
+      const cardHtml = match[0];
+      const id = match[1];
+      const title = match[2];
+
+      const coverMatch = cardHtml.match(/data-src="([^"]+)"/) || cardHtml.match(/src="([^"]+)"/);
+      const rawCover = coverMatch ? coverMatch[1] : '';
+      const posterUrl = normalizeImageUrl(rawCover);
+
+      const scoreMatch = cardHtml.match(/class="hg-drama-card__score">([^<]+)<\/span>/);
+      const score = scoreMatch ? parseFloat(scoreMatch[1].replace('分', '')) || 9.5 : 9.5;
+
+      const epMatch = cardHtml.match(/class="hg-drama-card__episode">([^<]+)<\/span>/);
+      const epText = epMatch ? epMatch[1] : '';
+      const epNumMatch = epText.match(/\d+/);
+      const totalEpisodes = epNumMatch ? parseInt(epNumMatch[0], 10) : 1;
+
+      const tags: string[] = [];
+      const tagRegex = /<a class="hg-tag"[^>]*>([^<]+)<\/a>/g;
+      let tMatch: RegExpExecArray | null;
+      while ((tMatch = tagRegex.exec(cardHtml)) !== null) {
+        tags.push(tMatch[1].trim());
+      }
+      if (tags.length === 0) {
+        tags.push(tagName);
+      }
+
+      const isOriginal = cardHtml.includes('原创');
+      const isNew = cardHtml.includes('新片');
+
+      dramas.push({
+        id,
+        title,
+        tagline: tags.slice(0, 3).join(' · '),
+        category: tags.includes('漫剧') ? '漫剧' : '短剧',
+        genres: tags,
+        posterUrl,
+        heroUrl: posterUrl,
+        status: epText.includes('全') || epText.includes('完结') ? '已完结' : '连载中',
+        totalEpisodes,
+        updatedEpisodes: totalEpisodes,
+        heatScore: 10000 - idx * 150,
+        playCountLabel: `${(8.5 - idx * 0.1).toFixed(1)}万热度`,
+        likesBase: 2500 - idx * 50,
+        rating: score,
+        releaseYear: '2026',
+        studio: isOriginal ? '黄果原创' : '黄果短剧',
+        synopsis: intro || `精选${tagName}题材短剧。`,
+        topicIds: [],
+        isFeatured: isOriginal || idx < 3,
+        isNew,
+        episodes: Array.from({ length: totalEpisodes }, (_, i) => ({
+          number: i + 1,
+          title: `第 ${i + 1} 集`,
+          hook: '',
+          durationSeconds: 90,
+          subtitles: [],
+          posterUrl,
+        })),
+      });
+
+      idx++;
+    }
+
+    if (dramas.length > 0) {
+      return {
+        tagName,
+        tagSlug: slug,
+        totalCount: totalCount || dramas.length,
+        intro,
+        dramas,
+      };
+    }
+  } catch (err) {
+    console.warn(`[dramaApi] fetchDramasByTag failed for "${tag}":`, err);
+  }
+
+  return null;
+}
+
 export async function fetchOfficialTags(baseUrl?: string): Promise<OfficialTagCategory[]> {
   const activeBase = normalizeBaseUrl(baseUrl || '');
   if (!activeBase) {

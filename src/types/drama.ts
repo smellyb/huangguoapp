@@ -34,10 +34,9 @@ export const OFFICIAL_CATEGORIES: OfficialCategory[] = [
 ];
 
 /**
- * 官方首页 20 个热门标签（按 huangguoai.com 热门标签栏完全对齐）
+ * 官方首页 20 个热门标签（按 huangguoai.com 热门标签栏完全对齐，共 20 个）
  */
 export const POPULAR_TAGS: DramaGenre[] = [
-  '全部',
   '都市',
   '古风',
   '奇幻',
@@ -59,6 +58,14 @@ export const POPULAR_TAGS: DramaGenre[] = [
   'NTR',
   '武侠',
 ];
+
+export interface TagCatalogResult {
+  tagName: string;
+  tagSlug: string;
+  totalCount?: number;
+  intro?: string;
+  dramas: Drama[];
+}
 
 export type RankingType = 'hot' | 'new' | 'comic';
 

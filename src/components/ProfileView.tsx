@@ -2,6 +2,8 @@ import { FormEvent, useMemo, useState } from 'react';
 import {
   Bookmark,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Copy,
   Database,
@@ -36,6 +38,7 @@ interface ProfileViewProps {
   watchHistory: WatchHistoryEntry[];
   apiConfig: ApiConfig;
   activeDataSource: 'demo' | 'custom';
+  currentLineLabel?: string;
   onPlayDrama: (drama: Drama, episodeNumber?: number, resumeSeconds?: number) => void;
   onToggleFollow: (dramaId: string) => void;
   onRemoveHistoryItem: (dramaId: string) => void;
@@ -60,9 +63,7 @@ const API_SCHEMA_SNIPPET = `GET {baseUrl}/dramas
         "number": 1,
         "title": "第 1 集",
         "durationSeconds": 90,
-        "hlsUrl": "https://cdn.example.com/ep1/master.m3u8",
-        "videoUrl": "https://cdn.example.com/ep1/video.mp4",
-        "posterUrl": "https://cdn.example.com/ep1/frame.jpg"
+        "hlsUrl": "https://cdn.example.com/ep1/master.m3u8"
       }
     ]
   }
@@ -82,6 +83,7 @@ export function ProfileView({
   watchHistory,
   apiConfig,
   activeDataSource,
+  currentLineLabel,
   onPlayDrama,
   onToggleFollow,
   onRemoveHistoryItem,
@@ -93,6 +95,7 @@ export function ProfileView({
   const [section, setSection] = useState<'library' | 'api'>('library');
   const [apiInput, setApiInput] = useState(apiConfig.baseUrl);
   const [testing, setTesting] = useState(false);
+  const [showDevDocs, setShowDevDocs] = useState(false);
   const [testResult, setTestResult] = useState<{
     ok: boolean;
     message: string;
@@ -130,7 +133,7 @@ export function ProfileView({
     if (!isValidHttpUrl(trimmed)) {
       setTestResult({
         ok: false,
-        message: '请输入以 http:// 或 https:// 开头的有效片源 API 基地址。',
+        message: '请输入以 http:// 或 https:// 开头的有效片源地址。',
       });
       return;
     }
@@ -146,12 +149,13 @@ export function ProfileView({
         mode: 'custom',
         baseUrl: normalizeBaseUrl(trimmed),
       });
-      onNotify('已连接并切换至自定义片源接口');
+      onNotify('已连接并切换至自定义片源');
     }
   };
 
-  const handleUseDemoMode = () => {
+  const handleResetOfficial = () => {
     onUpdateApiConfig({ mode: 'custom', baseUrl: 'https://huangguoai.com' });
+    setApiInput('https://huangguoai.com');
     setTestResult(null);
     onNotify('已重置为官方片源接口');
   };
@@ -161,34 +165,35 @@ export function ProfileView({
       await navigator.clipboard.writeText(API_SCHEMA_SNIPPET);
       onNotify('JSON 接口协议示例已复制');
     } catch {
-      onNotify('请手动选中并复制协议示例');
+      onNotify('请手动复制协议示例');
     }
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-8">
-      {/* Header + Segmented Section Switch */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/[0.08] pb-6">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl sm:text-3xl font-bold text-white">我的剧库</h1>
+    <div className="max-w-6xl mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6">
+      {/* Compact Header + Segmented Switch */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3.5 pb-4 border-b border-white/[0.08]">
+        <div className="space-y-1">
+          <h1 className="text-xl sm:text-2xl font-bold text-white">我的剧库</h1>
           <p className="text-xs sm:text-sm text-slate-400 tabular-nums">
             追剧 {followedDramas.length} 部 <span aria-hidden="true">·</span> 观看记录{' '}
-            {historyRows.length} 条 <span aria-hidden="true">·</span> 当前片源：
-            {activeDataSource === 'custom' ? '自定义远程接口' : '内置精选演示库'}
+            {historyRows.length} 条 <span aria-hidden="true">·</span>{' '}
+            {currentLineLabel ||
+              (activeDataSource === 'custom' ? '在线片源' : '内置离线库')}
           </p>
         </div>
 
         <div
           role="tablist"
           aria-label="个人中心栏目"
-          className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#14161D] border border-white/[0.08] self-start sm:self-auto"
+          className="grid grid-cols-2 sm:inline-flex items-center gap-1 p-1 rounded-xl bg-[#14161D] border border-white/[0.08]"
         >
           <button
             type="button"
             role="tab"
             aria-selected={section === 'library'}
             onClick={() => setSection('library')}
-            className={`min-h-[40px] px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+            className={`min-h-[40px] px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
               section === 'library'
                 ? 'bg-amber-500 text-[#0B0C10] font-semibold'
                 : 'text-slate-300 hover:text-white'
@@ -201,24 +206,48 @@ export function ProfileView({
             role="tab"
             aria-selected={section === 'api'}
             onClick={() => setSection('api')}
-            className={`min-h-[40px] px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+            className={`min-h-[40px] px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
               section === 'api'
                 ? 'bg-amber-500 text-[#0B0C10] font-semibold'
                 : 'text-slate-300 hover:text-white'
             }`}
           >
-            片源与线路设置
+            线路与片源
           </button>
         </div>
       </div>
 
       {section === 'library' ? (
-        <div className="space-y-10">
+        <div className="space-y-7">
+          {/* Quick Line Status Row */}
+          {onOpenLineSelector && (
+            <button
+              type="button"
+              onClick={onOpenLineSelector}
+              className="w-full text-left rounded-2xl bg-[#14161D] border border-white/[0.08] hover:border-amber-500/40 px-4 py-3.5 flex items-center justify-between gap-3 active:scale-[0.99] transition-all"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+                  <Wifi className="w-4 h-4" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">
+                    当前线路：{currentLineLabel || '默认线路'}
+                  </p>
+                  <p className="text-xs text-slate-400 truncate">
+                    播放卡顿或加载慢？点击一键测速并切换最快线路
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" aria-hidden="true" />
+            </button>
+          )}
+
           {/* Continue Watching */}
-          <section className="space-y-4">
+          <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg sm:text-xl font-bold text-white inline-flex items-center gap-2">
-                <Clock className="w-5 h-5 text-amber-400" aria-hidden="true" />
+              <h2 className="text-base sm:text-lg font-bold text-white inline-flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-400" aria-hidden="true" />
                 <span>继续观看</span>
               </h2>
               {historyRows.length > 0 && (
@@ -228,36 +257,38 @@ export function ProfileView({
                   className="min-h-[40px] px-2 text-xs text-slate-400 hover:text-amber-400 inline-flex items-center gap-1 transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>清空历史</span>
+                  <span>清空</span>
                 </button>
               )}
             </div>
 
             {historyRows.length === 0 ? (
-              <div className="rounded-3xl bg-[#14161D] border border-white/[0.08] py-12 px-6 text-center space-y-2">
+              <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] py-10 px-6 text-center space-y-1.5">
                 <p className="text-sm font-medium text-slate-200">暂无观看历史</p>
                 <p className="text-xs text-slate-400">
-                  在发现页或剧场观看短剧后，系统会自动记录您的集数与断点时间。
+                  看过的剧集会自动保存集数与播放断点
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {historyRows.map(({ entry, drama }) => {
                   const pct = Math.min(
                     100,
-                    Math.round((entry.progressSeconds / Math.max(entry.durationSeconds, 1)) * 100)
+                    Math.round(
+                      (entry.progressSeconds / Math.max(entry.durationSeconds, 1)) * 100
+                    )
                   );
                   return (
                     <div
                       key={drama.id}
-                      className="group rounded-2xl bg-[#14161D] border border-white/[0.08] hover:border-amber-500/40 p-3.5 flex items-center gap-3.5 transition-colors"
+                      className="rounded-2xl bg-[#14161D] border border-white/[0.08] p-3 flex items-center gap-3"
                     >
                       <button
                         type="button"
                         onClick={() =>
                           onPlayDrama(drama, entry.episodeNumber, entry.progressSeconds)
                         }
-                        className="relative w-16 aspect-[3/4] rounded-xl overflow-hidden bg-[#1D202A] shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                        className="relative w-14 aspect-[3/4] rounded-xl overflow-hidden bg-[#1D202A] shrink-0"
                       >
                         <DramaCoverImage
                           src={drama.posterUrl}
@@ -270,36 +301,33 @@ export function ProfileView({
                         />
                         <span className="absolute inset-0 bg-black/35 flex items-center justify-center pointer-events-none">
                           <Play
-                            className="w-5 h-5 text-white fill-current"
+                            className="w-4 h-4 text-white fill-current"
                             aria-hidden="true"
                           />
                         </span>
                       </button>
 
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onPlayDrama(drama, entry.episodeNumber, entry.progressSeconds)
-                          }
-                          className="text-left block w-full focus-visible:outline-none"
-                        >
-                          <h3 className="text-sm font-semibold text-white group-hover:text-amber-400 transition-colors truncate">
-                            {drama.title}
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5 font-mono tabular-nums">
-                            续播第 {entry.episodeNumber} 集 · 已看 {pct}% ·{' '}
-                            {formatRelativeTime(entry.updatedAt)}
-                          </p>
-                        </button>
-
-                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onPlayDrama(drama, entry.episodeNumber, entry.progressSeconds)
+                        }
+                        className="min-w-0 flex-1 text-left space-y-1.5 py-1"
+                      >
+                        <h3 className="text-sm font-semibold text-white truncate">
+                          {drama.title}
+                        </h3>
+                        <p className="text-xs text-slate-400 font-mono tabular-nums truncate">
+                          第 {entry.episodeNumber} 集 · {pct}% ·{' '}
+                          {formatRelativeTime(entry.updatedAt)}
+                        </p>
+                        <div className="h-1 rounded-full bg-white/10 overflow-hidden">
                           <div
-                            className="h-full rounded-full bg-amber-500"
+                            className="h-full rounded-full bg-amber-400"
                             style={{ width: `${pct}%` }}
                           />
                         </div>
-                      </div>
+                      </button>
 
                       <button
                         type="button"
@@ -317,21 +345,21 @@ export function ProfileView({
           </section>
 
           {/* Followed Dramas */}
-          <section className="space-y-4">
-            <h2 className="text-lg sm:text-xl font-bold text-white inline-flex items-center gap-2">
-              <Bookmark className="w-5 h-5 text-amber-400" aria-hidden="true" />
+          <section className="space-y-3">
+            <h2 className="text-base sm:text-lg font-bold text-white inline-flex items-center gap-2">
+              <Bookmark className="w-4 h-4 text-amber-400" aria-hidden="true" />
               <span>我的追剧</span>
             </h2>
 
             {followedDramas.length === 0 ? (
-              <div className="rounded-3xl bg-[#14161D] border border-white/[0.08] py-12 px-6 text-center space-y-2">
-                <p className="text-sm font-medium text-slate-200">还没有收藏追剧</p>
+              <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] py-10 px-6 text-center space-y-1.5">
+                <p className="text-sm font-medium text-slate-200">还没有追剧收藏</p>
                 <p className="text-xs text-slate-400">
-                  点击任意短剧的“加入追剧”按钮即可在此集中管理更新进度。
+                  在播放页点一下右侧「追剧」，即可在此快速续看
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                 {followedDramas.map((drama) => (
                   <div key={drama.id} className="space-y-2">
                     <DramaPoster
@@ -353,236 +381,156 @@ export function ProfileView({
           </section>
         </div>
       ) : (
-        /* Custom Piece-Source API Configuration Center & Line Switcher */
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          <div className="lg:col-span-7 space-y-6">
-            
-            {/* Quick Line Selector Card */}
-            <div className="rounded-3xl bg-gradient-to-br from-[#161822] to-[#12131A] border border-amber-500/30 p-6 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                    <Zap className="w-5 h-5 fill-current" />
-                  </div>
-                  <div>
-                    <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                      <span>官方线路与发布页导航</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                        免翻极速
-                      </span>
-                    </h2>
-                    <p className="text-xs text-slate-400">
-                      同步自官方发布页：
-                      <a
-                        href={PUBLISH_PAGE_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-amber-400 hover:underline font-mono"
-                      >
-                        huangguotv.github.io
-                      </a>
-                    </p>
-                  </div>
-                </div>
-
-                {onOpenLineSelector && (
-                  <button
-                    type="button"
-                    onClick={onOpenLineSelector}
-                    className="min-h-[40px] px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-xs font-bold inline-flex items-center gap-1.5 transition-colors self-start sm:self-auto shrink-0 shadow-lg shadow-amber-500/20"
-                  >
-                    <Wifi className="w-3.5 h-3.5" />
-                    <span>测速与换线面板</span>
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-2 pt-1 border-t border-white/[0.08]">
-                <div className="text-xs text-slate-300 font-medium">推荐国内直连线路（点击快捷填入）：</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {DEFAULT_SPEED_LINES.slice(0, 4).map((line) => (
-                    <button
-                      key={line.id}
-                      type="button"
-                      onClick={() => {
-                        setApiInput(line.url);
-                        onUpdateApiConfig({ mode: 'custom', baseUrl: line.url });
-                        onNotify(`已切换至：${line.name}`);
-                      }}
-                      className="p-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-colors flex items-center justify-between gap-2 group"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-slate-200 group-hover:text-amber-400 truncate">
-                          {line.name}
-                        </div>
-                        <div className="text-[10px] font-mono text-slate-500 truncate">
-                          {line.url}
-                        </div>
-                      </div>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 shrink-0 font-mono">
-                        {line.tag}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <form
-              onSubmit={handleTestAndSave}
-              className="rounded-3xl bg-[#14161D] border border-white/[0.08] p-6 space-y-5"
-            >
-              <div className="space-y-1">
-                <h2 className="text-lg font-bold text-white inline-flex items-center gap-2">
-                  <Server className="w-5 h-5 text-amber-400" aria-hidden="true" />
-                  <span>片源服务器地址设置</span>
+        <div className="space-y-5">
+          {/* Quick Line Selector Card */}
+          <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] p-4 sm:p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-amber-400" aria-hidden="true" />
+                  <span>极速直连线路</span>
                 </h2>
-                <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
-                  填写短剧 API 基地址（如{' '}
-                  <code className="font-mono text-slate-200">https://zv8c.zekpkeusp.cc</code>
-                  ），支持远程官方轮换镜像或本地开发代理。
+                <p className="text-xs text-slate-400">
+                  点击快捷切换，或打开测速面板自动挑选延迟最低的线路
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <label
-                  htmlFor="custom-api-url"
-                  className="block text-xs font-medium text-slate-300"
-                >
-                  当前配置地址（支持 HTTPS / HTTP 或本地代理）
-                </label>
-                <input
-                  id="custom-api-url"
-                  type="text"
-                  value={apiInput}
-                  onChange={(e) => setApiInput(e.target.value)}
-                  placeholder="https://huangguoai.com"
-                  className="w-full min-h-[48px] px-4 rounded-xl bg-[#0B0C10] border border-white/15 text-sm font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
-                />
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <span className="text-xs text-slate-400">官方入口：</span>
-                  <button
-                    type="button"
-                    onClick={() => setApiInput('https://huangguoai.com')}
-                    className="min-h-[32px] px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-medium transition-colors"
-                  >
-                    官网主站 (huangguoai.com)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setApiInput('https://huangguoai.ai')}
-                    className="min-h-[32px] px-3 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-slate-300 text-xs font-medium transition-colors"
-                  >
-                    中转入口 (huangguoai.ai)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setApiInput('/api-hg')}
-                    className="min-h-[32px] px-3 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-slate-300 text-xs font-medium transition-colors"
-                  >
-                    本地代理 (/api-hg)
-                  </button>
-                </div>
-              </div>
-
-              {testResult && (
-                <div
-                  role="status"
-                  className={`rounded-xl px-4 py-3 text-xs sm:text-sm flex items-start gap-2.5 border ${
-                    testResult.ok
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
-                      : 'bg-red-500/10 border-red-500/30 text-red-200'
-                  }`}
-                >
-                  {testResult.ok ? (
-                    <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
-                  ) : (
-                    <XCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
-                  )}
-                  <span>{testResult.message}</span>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={testing}
-                  className="min-h-[44px] px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-[#0B0C10] text-sm font-semibold inline-flex items-center gap-2 transition-colors whitespace-nowrap"
-                >
-                  <PlugZap className="w-4 h-4" aria-hidden="true" />
-                  <span>{testing ? '正在检测连通性...' : '测试并应用自定义片源'}</span>
-                </button>
-
+              {onOpenLineSelector && (
                 <button
                   type="button"
-                  onClick={handleUseDemoMode}
-                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-sm font-medium inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+                  onClick={onOpenLineSelector}
+                  className="min-h-[42px] px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shrink-0 active:scale-95"
                 >
-                  <Database className="w-4 h-4" aria-hidden="true" />
-                  <span>重置为官方接口</span>
+                  <Wifi className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>打开测速换线</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {DEFAULT_SPEED_LINES.slice(0, 4).map((line) => (
+                <button
+                  key={line.id}
+                  type="button"
+                  onClick={() => {
+                    setApiInput(line.url);
+                    onUpdateApiConfig({ mode: 'custom', baseUrl: line.url });
+                    onNotify(`已切换至：${line.name}`);
+                  }}
+                  className="min-h-[54px] px-3.5 py-2.5 rounded-xl bg-[#0B0C10] hover:bg-white/[0.06] border border-white/[0.08] text-left transition-colors flex items-center justify-between gap-2 active:scale-[0.99]"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs sm:text-sm font-semibold text-slate-100 truncate">
+                      {line.name}
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-500 truncate">
+                      {line.url}
+                    </div>
+                  </div>
+                  <span className="text-xs text-amber-400 font-medium shrink-0">
+                    使用
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom Server Input */}
+          <form
+            onSubmit={handleTestAndSave}
+            className="rounded-2xl bg-[#14161D] border border-white/[0.08] p-4 sm:p-6 space-y-4"
+          >
+            <div className="space-y-1">
+              <h2 className="text-base font-bold text-white inline-flex items-center gap-2">
+                <Server className="w-4 h-4 text-amber-400" aria-hidden="true" />
+                <span>自定义片源地址</span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                支持官方轮换镜像、HTTPS 片源接口或本地代理路径
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              <input
+                id="custom-api-url"
+                type="text"
+                value={apiInput}
+                onChange={(e) => setApiInput(e.target.value)}
+                placeholder="https://huangguoai.com"
+                className="w-full min-h-[46px] px-3.5 rounded-xl bg-[#0B0C10] border border-white/10 text-sm font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
+              />
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setApiInput('https://huangguoai.com')}
+                  className="min-h-[36px] px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-xs transition-colors"
+                >
+                  主站 (huangguoai.com)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setApiInput('https://huangguoai.ai')}
+                  className="min-h-[36px] px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-xs transition-colors"
+                >
+                  中转 (huangguoai.ai)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setApiInput('/api-hg')}
+                  className="min-h-[36px] px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-xs transition-colors"
+                >
+                  本地代理 (/api-hg)
                 </button>
               </div>
-            </form>
-
-            {/* Smooth Playback CDN Checklist */}
-            <div className="rounded-3xl bg-[#14161D] border border-white/[0.08] p-6 space-y-4">
-              <h3 className="text-base font-bold text-white">
-                流畅播放 / 防卡顿片源配置清单
-              </h3>
-              <ol className="space-y-3 text-xs sm:text-sm text-slate-300 leading-relaxed list-decimal list-inside">
-                <li>
-                  <span className="font-semibold text-white">优先使用 HLS（.m3u8）多码率切片</span>
-                  ：每片 2–4 秒并提供 480P / 720P / 1080P 主列表，播放器内置 hls.js 会随网速自动无缝切换码率。
-                </li>
-                <li>
-                  <span className="font-semibold text-white">MP4 务必开启 faststart 与 Range</span>
-                  ：转码加入 <code className="font-mono text-amber-300">-movflags +faststart</code>{' '}
-                  并在 CDN 开启 <code className="font-mono text-amber-300">Accept-Ranges: bytes</code>，实现边下边播与快速拖拽。
-                </li>
-                <li>
-                  <span className="font-semibold text-white">配置视频 CDN 跨域响应头（CORS）</span>
-                  ：返回 <code className="font-mono text-amber-300">Access-Control-Allow-Origin</code>，保障下一集 60% 进度自动静默预加载生效。
-                </li>
-                <li>
-                  <span className="font-semibold text-white">为每集提供 posterUrl 首帧图</span>
-                  ：切集瞬间由首帧图无缝垫底，视频首帧解码完成后平滑淡入，消除黑屏闪烁。
-                </li>
-              </ol>
             </div>
-          </div>
 
-          {/* Standardized JSON Protocol Reference */}
-          <div className="lg:col-span-5 rounded-3xl bg-[#14161D] border border-white/[0.08] p-6 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-base font-bold text-white">标准接口返回格式</h3>
+            {testResult && (
+              <div
+                role="status"
+                className={`rounded-xl px-3.5 py-2.5 text-xs flex items-start gap-2 border ${
+                  testResult.ok
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                    : 'bg-red-500/10 border-red-500/30 text-red-200'
+                }`}
+              >
+                {testResult.ok ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+                ) : (
+                  <XCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
+                )}
+                <span>{testResult.message}</span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="submit"
+                disabled={testing}
+                className="min-h-[44px] px-4 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-[#0B0C10] text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              >
+                <PlugZap className="w-4 h-4" aria-hidden="true" />
+                <span>{testing ? '检测连通中...' : '测试并应用'}</span>
+              </button>
+
               <button
                 type="button"
-                onClick={handleCopySchema}
-                className="min-h-[38px] px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-slate-200 inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                onClick={handleResetOfficial}
+                className="min-h-[44px] px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-xs sm:text-sm font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
               >
-                <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>复制示例</span>
+                <Database className="w-4 h-4" aria-hidden="true" />
+                <span>恢复默认</span>
               </button>
             </div>
+          </form>
 
-            <pre className="rounded-2xl bg-[#0B0C10] border border-white/[0.08] p-4 text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
-              {API_SCHEMA_SNIPPET}
-            </pre>
-
-            <p className="text-xs text-slate-400 leading-relaxed">
-              也可在部署环境变量中配置{' '}
-              <code className="font-mono text-slate-200">VITE_DRAMA_API_BASE_URL</code>
-              ，应用启动时将自动拉取您的远程片源。
-            </p>
-          </div>
-
-          {/* Official Safety Notice & Publishing Network (huangguotv.github.io) */}
-          <div className="lg:col-span-12 rounded-3xl bg-gradient-to-r from-[#171924] to-[#13151D] border border-amber-500/20 p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <ShieldCheck className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base font-bold text-white">官方地址发布页与防迷路网络</h3>
-              </div>
+          {/* Official Channels */}
+          <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] p-4 sm:p-6 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm sm:text-base font-bold text-white inline-flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-amber-400" aria-hidden="true" />
+                <span>官方防失联发布页</span>
+              </h3>
               <a
                 href={PUBLISH_PAGE_URL}
                 target="_blank"
@@ -590,26 +538,33 @@ export function ProfileView({
                 className="text-xs text-amber-400 hover:underline inline-flex items-center gap-1 font-mono"
               >
                 <span>huangguotv.github.io</span>
-                <ExternalLink className="w-3 h-3" />
+                <ExternalLink className="w-3 h-3" aria-hidden="true" />
               </a>
             </div>
 
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              黄果短剧官方唯一认证地址发布页部署于 GitHub Pages 与 Cloudflare 多云网络。认准唯一正版域名 <code className="font-mono text-amber-300">huangguoai.com</code>。若遇到线路阻断，请发送任意邮件至 <a href={`mailto:${OFFICIAL_SUPPORT_EMAIL}`} className="text-amber-300 underline font-mono">{OFFICIAL_SUPPORT_EMAIL}</a> 自动索取实时可用地址。
+            <p className="text-xs text-slate-400 leading-relaxed">
+              遇到线路阻断时，可发送邮件至{' '}
+              <a
+                href={`mailto:${OFFICIAL_SUPPORT_EMAIL}`}
+                className="text-amber-300 underline font-mono"
+              >
+                {OFFICIAL_SUPPORT_EMAIL}
+              </a>{' '}
+              自动获取最新可用地址。
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {OFFICIAL_CHANNELS.map((ch) => (
                 <a
                   key={ch.type}
                   href={ch.link}
                   target="_blank"
                   rel="noreferrer"
-                  className="p-3 rounded-2xl bg-[#0B0C10] border border-white/[0.08] hover:border-amber-500/30 transition-colors flex items-center gap-2.5 group"
+                  className="min-h-[48px] px-3 py-2 rounded-xl bg-[#0B0C10] border border-white/[0.08] hover:border-amber-500/30 transition-colors flex items-center gap-2"
                 >
-                  <Globe className="w-4 h-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+                  <Globe className="w-4 h-4 text-amber-400 shrink-0" aria-hidden="true" />
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold text-slate-200 group-hover:text-amber-300 truncate">
+                    <div className="text-xs font-semibold text-slate-200 truncate">
                       {ch.title}
                     </div>
                     <div className="text-[10px] text-slate-500 truncate">
@@ -619,6 +574,52 @@ export function ProfileView({
                 </a>
               ))}
             </div>
+          </div>
+
+          {/* Collapsible Advanced Developer Docs (Kept out of casual viewers' way) */}
+          <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowDevDocs((v) => !v)}
+              aria-expanded={showDevDocs}
+              className="w-full min-h-[52px] px-4 sm:px-6 flex items-center justify-between gap-3 text-left text-xs sm:text-sm font-medium text-slate-300 hover:text-white transition-colors"
+            >
+              <span>高级设置 · 开发者自建片源协议与 CDN 建议</span>
+              <ChevronDown
+                className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
+                  showDevDocs ? 'rotate-180' : ''
+                }`}
+                aria-hidden="true"
+              />
+            </button>
+
+            {showDevDocs && (
+              <div className="px-4 sm:px-6 pb-5 pt-2 border-t border-white/[0.06] space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-200">
+                    标准 JSON 返回格式
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopySchema}
+                    className="min-h-[36px] px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs text-slate-200 inline-flex items-center gap-1.5"
+                  >
+                    <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>复制示例</span>
+                  </button>
+                </div>
+
+                <pre className="rounded-xl bg-[#0B0C10] border border-white/[0.08] p-3.5 text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
+                  {API_SCHEMA_SNIPPET}
+                </pre>
+
+                <ul className="space-y-2 text-xs text-slate-400 leading-relaxed list-disc list-inside">
+                  <li>优先提供 HLS（.m3u8）多码率切片与 CORS 跨域头，支持平滑自适应码率与下一集静默预加载。</li>
+                  <li>MP4 片源建议开启 <code className="font-mono text-slate-200">-movflags +faststart</code> 与 <code className="font-mono text-slate-200">Accept-Ranges: bytes</code>。</li>
+                  <li>可在部署环境变量设置 <code className="font-mono text-slate-200">VITE_DRAMA_API_BASE_URL</code> 指定默认片源。</li>
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       )}

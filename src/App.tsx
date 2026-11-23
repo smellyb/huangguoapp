@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Clapperboard, Compass, Play, Search, User } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Clapperboard, Compass, Play, Search, User, Wifi } from 'lucide-react';
 import { DiscoverView } from './components/DiscoverView';
 import { LineSelectorModal } from './components/LineSelectorModal';
 import { ProfileView } from './components/ProfileView';
@@ -13,21 +13,18 @@ import type { AppTab, Drama, Topic } from './types/drama';
 interface DesktopNavItem {
   id: string;
   label: string;
-  tab?: AppTab;
+  tab: AppTab;
   category?: string;
-  action?: 'line' | 'app';
 }
 
 const DESKTOP_NAV_ITEMS: DesktopNavItem[] = [
-  { id: 'nav-home', label: '首页', tab: 'discover', category: '全部' },
+  { id: 'nav-home', label: '推荐', tab: 'discover', category: '全部' },
   { id: 'nav-original', label: '黄果原创', tab: 'discover', category: '黄果原创' },
   { id: 'nav-duanju', label: '短剧', tab: 'discover', category: '短剧' },
   { id: 'nav-manju', label: '漫剧', tab: 'discover', category: '漫剧' },
-  { id: 'nav-topics', label: '专题', tab: 'discover', category: '专题' },
   { id: 'nav-ranks', label: '排行榜', tab: 'discover', category: '排行榜' },
-  { id: 'nav-blog', label: '博客 ▾', tab: 'discover', category: 'AI魔改' },
-  { id: 'nav-path', label: '回家的路', action: 'line' },
-  { id: 'nav-app', label: '黄果短剧APP', action: 'app' },
+  { id: 'nav-search', label: '搜索', tab: 'search' },
+  { id: 'nav-profile', label: '我的', tab: 'profile' },
 ];
 
 const MOBILE_NAV_ITEMS: { id: AppTab; label: string; icon: typeof Compass }[] = [
@@ -37,25 +34,18 @@ const MOBILE_NAV_ITEMS: { id: AppTab; label: string; icon: typeof Compass }[] = 
   { id: 'profile', label: '我的', icon: User },
 ];
 
-export function BrandLogo({ className = '' }: { className?: string }) {
+export function BrandLogo({ compact = false }: { compact?: boolean }) {
   return (
-    <div className={`flex items-center gap-2 select-none ${className}`}>
-      {/* Yellow fruit icon with play mark */}
-      <div className="relative w-8 h-8 shrink-0 flex items-center justify-center">
-        {/* Leaf */}
-        <div className="absolute -top-0.5 right-1.5 w-2.5 h-2 rounded-full bg-emerald-400 rotate-45 transform origin-bottom-left" />
-        {/* Round yellow citrus fruit */}
-        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-300 via-amber-400 to-amber-500 shadow-md shadow-amber-500/25 flex items-center justify-center">
-          <div className="w-0 h-0 border-y-[4.5px] border-y-transparent border-l-[7px] border-l-white ml-0.5" />
+    <div className="flex items-center gap-2 select-none shrink-0">
+      <div className="relative w-7 h-7 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center">
+        <div className="absolute -top-0.5 right-1 w-2 h-1.5 rounded-full bg-emerald-400 rotate-45 transform origin-bottom-left" />
+        <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-gradient-to-br from-amber-300 via-amber-400 to-amber-500 flex items-center justify-center">
+          <div className="w-0 h-0 border-y-[4px] border-y-transparent border-l-[6px] border-l-white ml-0.5" />
         </div>
       </div>
-      <div className="flex flex-col text-left leading-tight">
-        <div className="flex items-baseline gap-0.5">
-          <span className="font-display text-base sm:text-lg font-black tracking-tight text-white">黄果短剧</span>
-          <span className="text-[10px] sm:text-xs font-black text-amber-400 font-mono">AI</span>
-        </div>
-        <span className="text-[9px] sm:text-[10px] text-slate-400 font-mono tracking-wider">huangguoai.com</span>
-      </div>
+      <span className="font-display text-base sm:text-lg font-bold tracking-tight text-white whitespace-nowrap">
+        {compact ? '黄果' : '黄果短剧'}
+      </span>
     </div>
   );
 }
@@ -75,6 +65,7 @@ export default function App() {
   } = useUserLibrary();
 
   const [activeTab, setActiveTab] = useState<AppTab>('discover');
+  const [returnTab, setReturnTab] = useState<AppTab>('discover');
   const [selectedCategory, setSelectedCategory] = useState<string>('全部');
   const [dramas, setDramas] = useState<Drama[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -94,9 +85,67 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLineModalOpen, setIsLineModalOpen] = useState(false);
 
+  // Refs for clean hardware/gesture Back stack handling
+  const activeTabRef = useRef<AppTab>(activeTab);
+  const returnTabRef = useRef<AppTab>(returnTab);
+  const lineModalOpenRef = useRef<boolean>(isLineModalOpen);
+  const overlayBackHandlerRef = useRef<(() => boolean) | null>(null);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    returnTabRef.current = returnTab;
+  }, [returnTab]);
+
+  useEffect(() => {
+    lineModalOpenRef.current = isLineModalOpen;
+  }, [isLineModalOpen]);
+
+  // Unified mobile back-button / gesture navigation stack
+  const pushHistoryLayer = useCallback((layer: string) => {
+    try {
+      window.history.pushState({ hgLayer: layer }, '');
+    } catch {
+      // Ignore in restricted environments
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      if (lineModalOpenRef.current) {
+        setIsLineModalOpen(false);
+        return;
+      }
+      if (overlayBackHandlerRef.current && overlayBackHandlerRef.current()) {
+        return;
+      }
+      if (activeTabRef.current === 'theater') {
+        setActiveTab(returnTabRef.current || 'discover');
+        return;
+      }
+      if (activeTabRef.current === 'search') {
+        setActiveTab('discover');
+      }
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const openLineModal = useCallback(() => {
+    setIsLineModalOpen(true);
+    pushHistoryLayer('line-modal');
+  }, [pushHistoryLayer]);
+
+  const closeLineModal = useCallback(() => {
+    setIsLineModalOpen(false);
+  }, []);
+
   const currentLineLabel = useMemo(() => {
     if (state.apiConfig.mode === 'demo' || !state.apiConfig.baseUrl) {
-      return '内置离线库';
+      return '离线库';
     }
     const targetUrl = state.apiConfig.baseUrl.trim().replace(/\/+$/, '').toLowerCase();
     const matched = [...DEFAULT_SPEED_LINES, ...DEFAULT_PERMANENT_DOMAINS].find(
@@ -108,9 +157,9 @@ export default function App() {
     if (targetUrl === '/api-hg') return '本地代理';
     try {
       const u = new URL(state.apiConfig.baseUrl, window.location.origin);
-      return u.hostname || '自定义线路';
+      return u.hostname || '自定义';
     } catch {
-      return '自定义线路';
+      return '自定义';
     }
   }, [state.apiConfig.mode, state.apiConfig.baseUrl]);
 
@@ -120,7 +169,7 @@ export default function App() {
 
   useEffect(() => {
     if (!toastMessage) return;
-    const timer = window.setTimeout(() => setToastMessage(null), 2400);
+    const timer = window.setTimeout(() => setToastMessage(null), 2200);
     return () => window.clearTimeout(timer);
   }, [toastMessage]);
 
@@ -157,14 +206,17 @@ export default function App() {
     [dramas, currentDramaId]
   );
 
-  // Automatically fetch full episode detail list for remote dramas
+  // Automatically fetch full episode list for remote dramas
   useEffect(() => {
     if (!state.apiConfig.baseUrl || state.apiConfig.mode !== 'custom') return;
     const drama = dramas.find((d) => d.id === currentDramaId);
     if (!drama) return;
 
-    // If episodes are placeholders or have no detailed names, fetch real episode list
-    if (!drama.episodes || drama.episodes.length <= 1 || drama.episodes[0]?.title === '第 1 集') {
+    if (
+      !drama.episodes ||
+      drama.episodes.length <= 1 ||
+      drama.episodes[0]?.title === '第 1 集'
+    ) {
       fetchDramaDetail(state.apiConfig.baseUrl, currentDramaId).then((detail) => {
         if (!detail || !detail.episodes || detail.episodes.length === 0) return;
         setDramas((prev) =>
@@ -199,14 +251,31 @@ export default function App() {
             ? saved.progressSeconds
             : 0;
 
+      if (activeTabRef.current !== 'theater') {
+        setReturnTab(activeTabRef.current);
+        pushHistoryLayer('theater');
+      }
+
       setCurrentDramaId(drama.id);
       setCurrentEpisodeNumber(targetEp);
       setResumeSeconds(targetTime);
       setActiveTab('theater');
       window.scrollTo({ top: 0 });
     },
-    [state.watchHistory]
+    [pushHistoryLayer, state.watchHistory]
   );
+
+  const exitTheater = useCallback(() => {
+    setActiveTab(returnTabRef.current || 'discover');
+  }, []);
+
+  const openSearchTab = useCallback(() => {
+    if (activeTabRef.current !== 'search') {
+      pushHistoryLayer('search');
+    }
+    setActiveTab('search');
+    window.scrollTo({ top: 0 });
+  }, [pushHistoryLayer]);
 
   const handleSelectDramaEpisode = useCallback(
     (dramaId: string, episodeNum: number, startSeconds = 0) => {
@@ -220,7 +289,7 @@ export default function App() {
   const handleToggleFollow = useCallback(
     (dramaId: string) => {
       const added = toggleFollow(dramaId);
-      showToast(added ? '已加入追剧列表' : '已取消追剧');
+      showToast(added ? '已加入追剧' : '已取消追剧');
     },
     [showToast, toggleFollow]
   );
@@ -235,11 +304,24 @@ export default function App() {
 
   const latestWatched = state.watchHistory[0];
 
+  const handleEnterTheaterQuick = useCallback(() => {
+    if (latestWatched) {
+      const target = dramas.find((d) => d.id === latestWatched.dramaId) ?? activeDrama;
+      if (target) {
+        openTheater(target, latestWatched.episodeNumber, latestWatched.progressSeconds);
+        return;
+      }
+    }
+    if (activeDrama) {
+      openTheater(activeDrama, 1, 0);
+    }
+  }, [activeDrama, dramas, latestWatched, openTheater]);
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0B0C10] text-[#F8FAFC]">
-      {/* Desktop 3-Zone Top Bar Contract */}
+      {/* Desktop Top Bar */}
       <header className="hidden md:block sticky top-0 z-30 h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-white/[0.08]">
-        <div className="max-w-7xl mx-auto h-full px-4 lg:px-8 flex items-center justify-between gap-6">
+        <div className="max-w-7xl mx-auto h-full px-6 lg:px-8 flex items-center justify-between gap-8">
           <button
             type="button"
             onClick={() => {
@@ -254,7 +336,7 @@ export default function App() {
 
           <nav
             aria-label="主导航"
-            className="flex items-center gap-4 lg:gap-6 text-sm font-medium overflow-x-auto no-scrollbar py-1"
+            className="flex items-center gap-6 text-sm font-medium overflow-x-auto no-scrollbar"
           >
             {DESKTOP_NAV_ITEMS.map((item) => {
               const active =
@@ -265,27 +347,16 @@ export default function App() {
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    if (item.action === 'line') {
-                      setIsLineModalOpen(true);
-                      return;
-                    }
-                    if (item.action === 'app') {
-                      showToast('已为您提供官方 Android APK 下载');
-                      window.open('https://huangguoai.com/app', '_blank');
-                      return;
-                    }
-                    if (item.tab) {
-                      setActiveTab(item.tab);
-                    }
+                    setActiveTab(item.tab);
                     if (item.category) {
                       setSelectedCategory(item.category);
                     }
                     window.scrollTo({ top: 0 });
                   }}
-                  className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 text-sm ${
+                  className={`py-1.5 transition-colors whitespace-nowrap shrink-0 border-b-2 text-sm ${
                     active
-                      ? 'text-amber-400 border-amber-400 font-bold'
-                      : 'text-slate-300 border-transparent hover:text-white font-medium'
+                      ? 'text-amber-400 border-amber-400 font-semibold'
+                      : 'text-slate-300 border-transparent hover:text-white'
                   }`}
                 >
                   {item.label}
@@ -297,26 +368,18 @@ export default function App() {
           <div className="flex items-center gap-2.5 shrink-0">
             <button
               type="button"
-              onClick={() => setIsLineModalOpen(true)}
-              className="min-h-[38px] px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-amber-500/30 text-xs text-slate-200 inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
-              title="切换短剧片源与网络线路 (huangguotv.github.io)"
+              onClick={openLineModal}
+              className="min-h-[38px] px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-xs text-slate-200 inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+              title="切换片源线路"
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-              <span className="font-mono text-amber-300 font-semibold">{currentLineLabel}</span>
-              <span className="text-[11px] text-slate-400 border-l border-white/10 pl-1.5">换线</span>
+              <Wifi className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+              <span className="font-medium">{currentLineLabel}</span>
             </button>
 
             <button
               type="button"
-              onClick={() => {
-                if (latestWatched) {
-                  const target = dramas.find((d) => d.id === latestWatched.dramaId) ?? activeDrama;
-                  openTheater(target, latestWatched.episodeNumber, latestWatched.progressSeconds);
-                } else {
-                  openTheater(activeDrama, 1, 0);
-                }
-              }}
-              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 shadow-md shadow-amber-500/10"
+              onClick={handleEnterTheaterQuick}
+              className="min-h-[38px] px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-sm font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
             >
               <Play className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
               <span>{latestWatched ? '继续刷剧' : '进入剧场'}</span>
@@ -325,38 +388,42 @@ export default function App() {
         </div>
       </header>
 
-      {/* Mobile Compact Header (hidden in immersive Theater mode for maximum video height) */}
-      {activeTab !== 'theater' && (
-        <header className="md:hidden sticky top-0 z-30 h-[52px] px-3 bg-[#0B0C10]/95 backdrop-blur-md border-b border-white/[0.08] flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('discover');
-              setSelectedCategory('全部');
-            }}
-            className="shrink-0 focus-visible:outline-none p-1"
-          >
-            <BrandLogo />
-          </button>
-
-          <div className="flex items-center gap-1.5 shrink-0">
+      {/* Mobile Compact Single-Row Top Bar (Hidden in immersive Theater & dedicated Search view) */}
+      {activeTab !== 'theater' && activeTab !== 'search' && (
+        <header className="md:hidden sticky top-0 z-30 bg-[#0B0C10]/95 backdrop-blur-md border-b border-white/[0.06] pt-safe">
+          <div className="h-[52px] px-3.5 flex items-center gap-2.5">
             <button
               type="button"
-              onClick={() => setIsLineModalOpen(true)}
-              className="min-h-[32px] px-2.5 rounded-xl bg-white/[0.06] border border-amber-500/30 text-amber-300 text-[11px] font-semibold inline-flex items-center gap-1.5"
-              title="切换短剧线路"
+              onClick={() => {
+                setActiveTab('discover');
+                setSelectedCategory('全部');
+                window.scrollTo({ top: 0 });
+              }}
+              aria-label="回到首页"
+              className="shrink-0 focus-visible:outline-none"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="truncate max-w-[70px]">{currentLineLabel}</span>
+              <BrandLogo compact />
             </button>
 
+            {/* Unified Search Trigger (No duplicate search bar inside Discover!) */}
             <button
               type="button"
-              onClick={() => setActiveTab('search')}
-              aria-label="打开搜索"
-              className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-300 hover:text-amber-400"
+              onClick={openSearchTab}
+              className="flex-1 min-h-[36px] px-3 rounded-xl bg-[#14161D] border border-white/[0.08] flex items-center gap-2 text-xs text-slate-400 active:scale-[0.99] transition-transform min-w-0"
             >
-              <Search className="w-5 h-5" aria-hidden="true" />
+              <Search className="w-3.5 h-3.5 text-amber-400 shrink-0" aria-hidden="true" />
+              <span className="truncate">搜短剧、漫剧、题材...</span>
+            </button>
+
+            {/* Compact Single Line Switcher */}
+            <button
+              type="button"
+              onClick={openLineModal}
+              aria-label="切换线路与测速"
+              className="min-h-[36px] px-2.5 rounded-xl bg-[#14161D] border border-white/[0.08] text-slate-200 text-xs font-medium inline-flex items-center gap-1 shrink-0 active:scale-95 transition-transform"
+            >
+              <Wifi className="w-3.5 h-3.5 text-amber-400 shrink-0" aria-hidden="true" />
+              <span className="truncate max-w-[54px]">{currentLineLabel}</span>
             </button>
           </div>
         </header>
@@ -365,7 +432,7 @@ export default function App() {
       {/* Main Content Area */}
       <main
         className={`flex-1 ${
-          activeTab === 'theater' ? 'pb-16 md:pb-0' : 'pb-24 md:pb-12'
+          activeTab === 'theater' ? 'pb-0' : 'pb-[78px] md:pb-12'
         }`}
       >
         {activeTab === 'discover' && (
@@ -373,14 +440,16 @@ export default function App() {
             dramas={dramas}
             topics={topics}
             followedIds={state.followedIds}
+            latestWatched={latestWatched}
             loading={catalogLoading}
             warning={catalogWarning}
             selectedCategory={selectedCategory}
             onSelectCategory={setSelectedCategory}
-            onPlayDrama={(drama, ep) => openTheater(drama, ep)}
+            onPlayDrama={(drama, ep, sec) => openTheater(drama, ep, sec)}
             onToggleFollow={handleToggleFollow}
-            onOpenSearch={() => setActiveTab('search')}
-            onOpenLineSelector={() => setIsLineModalOpen(true)}
+            onOpenLineSelector={openLineModal}
+            onPushHistoryLayer={pushHistoryLayer}
+            overlayBackHandlerRef={overlayBackHandlerRef}
           />
         )}
 
@@ -393,14 +462,20 @@ export default function App() {
             followedIds={state.followedIds}
             likedEpisodeKeys={state.likedEpisodeKeys}
             preferredQuality={state.apiConfig.preferredQuality}
-            apiBaseUrl={state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : undefined}
+            apiBaseUrl={
+              state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : undefined
+            }
+            currentLineLabel={currentLineLabel}
+            onExitTheater={exitTheater}
+            onPushHistoryLayer={pushHistoryLayer}
+            overlayBackHandlerRef={overlayBackHandlerRef}
             onChangeQuality={(quality) => updateApiConfig({ preferredQuality: quality })}
             onSelectDramaEpisode={handleSelectDramaEpisode}
             onToggleFollow={handleToggleFollow}
             onToggleLike={handleToggleLike}
             onRecordProgress={recordProgress}
             onNotify={showToast}
-            onOpenLineSelector={() => setIsLineModalOpen(true)}
+            onOpenLineSelector={openLineModal}
           />
         )}
 
@@ -408,7 +483,10 @@ export default function App() {
           <SearchView
             dramas={dramas}
             searchHistory={state.searchHistory}
-            apiBaseUrl={state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : undefined}
+            apiBaseUrl={
+              state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : undefined
+            }
+            onBack={() => setActiveTab('discover')}
             onAddSearchTerm={addSearchTerm}
             onRemoveSearchTerm={removeSearchTerm}
             onClearSearchHistory={clearSearchHistory}
@@ -423,76 +501,95 @@ export default function App() {
             watchHistory={state.watchHistory}
             apiConfig={state.apiConfig}
             activeDataSource={dataSource}
+            currentLineLabel={currentLineLabel}
             onPlayDrama={(drama, ep, sec) => openTheater(drama, ep, sec)}
             onToggleFollow={handleToggleFollow}
             onRemoveHistoryItem={removeHistoryItem}
             onClearHistory={clearHistory}
             onUpdateApiConfig={updateApiConfig}
             onNotify={showToast}
-            onOpenLineSelector={() => setIsLineModalOpen(true)}
+            onOpenLineSelector={openLineModal}
           />
         )}
       </main>
 
-      {/* Quiet Desktop Footer (hidden on immersive Theater) */}
+      {/* Quiet Desktop Footer */}
       {activeTab !== 'theater' && (
         <footer className="hidden md:block border-t border-white/[0.06] mt-auto">
           <div className="max-w-7xl mx-auto px-6 lg:px-8 py-6 flex items-center justify-between text-xs text-slate-500">
             <span className="font-display font-semibold text-slate-300">
               黄果短剧
             </span>
-            <span>短剧 · 漫剧 · AI换脸 · AI魔改 · 支持自定义片源 API 接入</span>
+            <span>短剧 · 漫剧 · AI换脸 · AI魔改 · 支持自定义片源接入</span>
           </div>
         </footer>
       )}
 
-      {/* Mobile Fixed 4-Tab Bottom Navigation Bar */}
-      <nav
-        aria-label="底部导航"
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0B0C10]/95 backdrop-blur-md border-t border-white/[0.08] pb-safe"
-      >
-        <div className="grid grid-cols-4 h-16 items-center">
-          {MOBILE_NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const active = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => {
-                  setActiveTab(item.id);
-                  window.scrollTo({ top: 0 });
-                }}
-                aria-current={active ? 'page' : undefined}
-                className={`min-h-[48px] flex flex-col items-center justify-center gap-1 transition-colors ${
-                  active ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Icon className="w-[22px] h-[22px]" aria-hidden="true" />
-                <span className="text-[11px] font-medium tracking-tight">
-                  {item.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      {/* Mobile Fixed 4-Tab Bottom Navigation Bar (Auto-hidden in immersive Theater for full 100dvh video!) */}
+      {activeTab !== 'theater' && (
+        <nav
+          aria-label="底部导航"
+          className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0B0C10]/95 backdrop-blur-md border-t border-white/[0.08] pb-safe"
+        >
+          <div className="grid grid-cols-4 h-[60px] items-center">
+            {MOBILE_NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              const active = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    if (item.id === 'theater') {
+                      handleEnterTheaterQuick();
+                      return;
+                    }
+                    if (item.id === 'search') {
+                      openSearchTab();
+                      return;
+                    }
+                    setActiveTab(item.id);
+                    window.scrollTo({ top: 0 });
+                  }}
+                  aria-current={active ? 'page' : undefined}
+                  className={`min-h-[48px] flex flex-col items-center justify-center gap-0.5 active:scale-95 transition-all ${
+                    active ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Icon
+                    className="w-[21px] h-[21px]"
+                    strokeWidth={active ? 2.4 : 1.9}
+                    aria-hidden="true"
+                  />
+                  <span className="text-[11px] font-medium tracking-tight">
+                    {item.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      )}
 
-      {/* Lightweight Action Toast */}
+      {/* Action Toast */}
       {toastMessage && (
         <div
           role="status"
           aria-live="polite"
-          className="fixed left-1/2 -translate-x-1/2 bottom-20 md:bottom-8 z-50 px-4 py-2.5 rounded-2xl bg-[#1D202A]/95 border border-white/15 text-xs sm:text-sm font-medium text-white shadow-xl backdrop-blur-md whitespace-nowrap"
+          className={`fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-[#1D202A]/95 border border-white/15 text-xs sm:text-sm font-medium text-white shadow-xl backdrop-blur-md whitespace-nowrap pointer-events-none ${
+            activeTab === 'theater'
+              ? 'top-[calc(env(safe-area-inset-top,0px)+64px)]'
+              : 'bottom-[calc(env(safe-area-inset-bottom,0px)+76px)] md:bottom-8'
+          }`}
         >
           {toastMessage}
         </div>
       )}
 
-      {/* Multi-Line & Server Selector Modal (huangguotv.github.io) */}
+      {/* Line Selector Bottom Sheet / Modal */}
       <LineSelectorModal
         isOpen={isLineModalOpen}
-        onClose={() => setIsLineModalOpen(false)}
+        onClose={closeLineModal}
         currentBaseUrl={state.apiConfig.mode === 'custom' ? state.apiConfig.baseUrl : ''}
         onSelectLine={(url) => {
           if (!url) {

@@ -23,7 +23,8 @@ export type DramaGenre =
   | '武侠'
   | '科幻'
   | '机甲'
-  | '国风';
+  | '国风'
+  | '恋爱';
 
 export interface OfficialCategory {
   id: number;

@@ -10,7 +10,7 @@ export default defineConfig({
     allowedHosts: true,
     hmr: false,
     watch: {
-      ignored: ['**/*.apk', '**/android/**', '**/dist/**'],
+      ignored: ['**/*.apk*', '**/android/**', '**/dist/**', '**/hongguo/**', '**/.git/**'],
     },
     proxy: {
       '/api-hg': {

@@ -10,7 +10,12 @@ import {
   Tag,
   X,
 } from 'lucide-react';
-import { deriveRankings, fetchDramasByTag, fetchOfficialTags } from '../services/dramaApi';
+import {
+  deriveHomeSections,
+  deriveRankings,
+  fetchDramasByTag,
+  fetchOfficialTags,
+} from '../services/dramaApi';
 import {
   POPULAR_TAGS,
   type Drama,
@@ -296,6 +301,11 @@ export function DiscoverView({
     [dramas, rankingTab]
   );
 
+  const homeSections = useMemo(
+    () => deriveHomeSections(dramas, topics),
+    [dramas, topics]
+  );
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5">
@@ -318,6 +328,8 @@ export function DiscoverView({
 
   const isRankingOnlyView = !selectedTopic && activeChannel === '排行榜';
   const isTopicsOnlyView = !selectedTopic && activeChannel === '专题';
+  const isHomePage =
+    activeChannel === '全部' && selectedGenre === '全部' && !selectedTopic;
 
   return (
     <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 pt-2 sm:pt-6 pb-4 space-y-5 sm:space-y-10">
@@ -623,245 +635,446 @@ export function DiscoverView({
             </div>
           )}
 
-          {/* Section Heading & Sort Bar */}
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-2">
-              <span className="w-1 h-3.5 rounded-full bg-[#ffd21c]" />
-              <h2 className="text-sm sm:text-base font-bold text-white">
-                {selectedGenre !== '全部'
-                  ? `全部${selectedGenre}短剧 · 共 ${tagTotalCount || sortedDramas.length} 部`
-                  : activeChannel === '短剧'
-                  ? channelSubFilter === 'hot'
-                    ? '当前热播的AI成人短剧'
-                    : channelSubFilter === 'recommended'
-                    ? '精选推荐的AI成人短剧'
-                    : '最新更新的AI成人短剧'
-                  : activeChannel === '漫剧'
-                  ? channelSubFilter === 'hot'
-                    ? '当前热播的AI成人漫剧'
-                    : channelSubFilter === 'recommended'
-                    ? '精选推荐的AI成人漫剧'
-                    : '最新更新的AI成人漫剧'
-                  : activeChannel === '黄果原创'
-                  ? '精选独家原创短剧与漫剧'
-                  : '最新更新短剧'}
-              </h2>
-              {isTagLoading ? (
-                <span className="text-xs text-amber-400/80 animate-pulse font-normal">
-                  同步中...
-                </span>
-              ) : (
-                <span className="text-xs text-slate-500 font-mono">
-                  共 {sortedDramas.length} 部
-                </span>
-              )}
-            </div>
+          {/* Section Heading & Sort Bar (Rendered when filtering by tag or channel) */}
+          {!isHomePage && (
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center gap-2">
+                <span className="w-1 h-3.5 rounded-full bg-[#ffd21c]" />
+                <h2 className="text-sm sm:text-base font-bold text-white">
+                  {selectedGenre !== '全部'
+                    ? `全部${selectedGenre}短剧 · 共 ${tagTotalCount || sortedDramas.length} 部`
+                    : activeChannel === '短剧'
+                    ? channelSubFilter === 'hot'
+                      ? '当前热播的AI成人短剧'
+                      : channelSubFilter === 'recommended'
+                      ? '精选推荐的AI成人短剧'
+                      : '最新更新的AI成人短剧'
+                    : activeChannel === '漫剧'
+                    ? channelSubFilter === 'hot'
+                      ? '当前热播的AI成人漫剧'
+                      : channelSubFilter === 'recommended'
+                      ? '精选推荐的AI成人漫剧'
+                      : '最新更新的AI成人漫剧'
+                    : activeChannel === '黄果原创'
+                    ? '精选独家原创短剧与漫剧'
+                    : '最新更新短剧'}
+                </h2>
+                {isTagLoading ? (
+                  <span className="text-xs text-amber-400/80 animate-pulse font-normal">
+                    同步中...
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-500 font-mono">
+                    共 {sortedDramas.length} 部
+                  </span>
+                )}
+              </div>
 
-            {/* Compact Sort Segmented Control */}
-            <div className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-[#14161D] border border-white/[0.08]">
-              {SORT_OPTIONS.map((opt) => {
-                const active = sortMode === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    onClick={() => setSortMode(opt.key)}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap ${
-                      active
-                        ? 'bg-amber-500 text-[#0B0C10]'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Drama Poster Grid */}
-      {!isRankingOnlyView && !isTopicsOnlyView && (
-        <section aria-label="剧集列表" className="space-y-3">
-          {sortedDramas.length === 0 ? (
-            <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] py-12 px-6 text-center space-y-3">
-              <p className="text-sm font-medium text-slate-200">
-                当前筛选条件下暂无剧集
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  handleSelectChannel('全部');
-                  handleSelectGenre('全部');
-                }}
-                className="min-h-[44px] px-5 rounded-xl bg-amber-500 text-[#0B0C10] text-sm font-semibold hover:bg-amber-400 transition-colors"
-              >
-                查看全部剧集
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
-              {sortedDramas.map((drama) => (
-                <DramaPoster
-                  key={drama.id}
-                  drama={drama}
-                  onSelect={(item) => onPlayDrama(item)}
-                  onSelectTag={(tag) => handleSelectGenre(tag)}
-                />
-              ))}
+              {/* Compact Sort Segmented Control */}
+              <div className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-[#14161D] border border-white/[0.08]">
+                {SORT_OPTIONS.map((opt) => {
+                  const active = sortMode === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setSortMode(opt.key)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                        active
+                          ? 'bg-amber-500 text-[#0B0C10]'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </section>
       )}
 
-      {/* Top Rankings Section */}
-      {!selectedTopic && !isTopicsOnlyView && (
-        <section aria-label="热播排行榜" className="space-y-4 pt-2">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg sm:text-xl font-bold text-white">热播排行榜</h2>
+      {/* ======================================================== */}
+      {/* Official Homepage Modular Sections (huangguoai.com 对齐) */}
+      {/* ======================================================== */}
+      {isHomePage ? (
+        <div className="space-y-8 pb-4">
+          {/* Section 2: 黄果原创 */}
+          <section aria-label="黄果原创" className="space-y-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="w-1 h-4 rounded-full bg-[#ffd21c]" />
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                  黄果原创
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSelectChannel('黄果原创')}
+                className="text-xs text-slate-400 hover:text-[#ffd21c] inline-flex items-center gap-0.5 transition-colors group"
+              >
+                <span>查看全部</span>
+                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
 
-            <div
-              role="tablist"
-              aria-label="排行榜分类"
-              className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#14161D] border border-white/[0.08]"
-            >
-              {(
-                [
-                  { key: 'hot', label: '热播榜' },
-                  { key: 'new', label: '新剧榜' },
-                  { key: 'comic', label: '漫剧榜' },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={rankingTab === tab.key}
-                  onClick={() => setRankingTab(tab.key)}
-                  className={`min-h-[34px] px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                    rankingTab === tab.key
-                      ? 'bg-amber-500 text-[#0B0C10] font-semibold'
-                      : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {tab.label}
-                </button>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 sm:gap-4">
+              {homeSections.original.map((drama) => (
+                <DramaPoster
+                  key={`original-${drama.id}`}
+                  drama={drama}
+                  badgeType="original-new"
+                  onSelect={(item) => onPlayDrama(item)}
+                  onSelectTag={(tag) => handleSelectGenre(tag)}
+                />
               ))}
             </div>
-          </div>
+          </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {(isRankingOnlyView ? rankedDramas : rankedDramas.slice(0, 6)).map(
-              (drama, index) => {
-                const rankNumber = String(index + 1).padStart(2, '0');
-                const isTopThree = index < 3;
-                return (
+          {/* Section 3: 精选推荐 */}
+          <section aria-label="精选推荐" className="space-y-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="w-1 h-4 rounded-full bg-[#ffd21c]" />
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                  精选推荐
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSortMode('recommended')}
+                className="text-xs text-slate-400 hover:text-[#ffd21c] inline-flex items-center gap-0.5 transition-colors group"
+              >
+                <span>更多推荐</span>
+                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 sm:gap-4">
+              {homeSections.featured.map((drama) => (
+                <DramaPoster
+                  key={`featured-${drama.id}`}
+                  drama={drama}
+                  badgeType="original-hot"
+                  onSelect={(item) => onPlayDrama(item)}
+                  onSelectTag={(tag) => handleSelectGenre(tag)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* Section 4: 最近上新 */}
+          <section aria-label="最近上新" className="space-y-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="w-1 h-4 rounded-full bg-[#ffd21c]" />
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                  最近上新
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSortMode('latest')}
+                className="text-xs text-slate-400 hover:text-[#ffd21c] inline-flex items-center gap-0.5 transition-colors group"
+              >
+                <span>全部上新</span>
+                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+              {homeSections.latest.map((drama) => (
+                <DramaPoster
+                  key={`latest-${drama.id}`}
+                  drama={drama}
+                  badgeType="new"
+                  onSelect={(item) => onPlayDrama(item)}
+                  onSelectTag={(tag) => handleSelectGenre(tag)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* Section 5: 热播短剧 */}
+          <section aria-label="热播短剧" className="space-y-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="w-1 h-4 rounded-full bg-[#ffd21c]" />
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                  热播短剧
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSelectChannel('排行榜')}
+                className="text-xs text-slate-400 hover:text-[#ffd21c] inline-flex items-center gap-0.5 transition-colors group"
+              >
+                <span>完整榜单</span>
+                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+              {homeSections.hot.map((drama) => (
+                <DramaPoster
+                  key={`hot-${drama.id}`}
+                  drama={drama}
+                  badgeType="hot"
+                  onSelect={(item) => onPlayDrama(item)}
+                  onSelectTag={(tag) => handleSelectGenre(tag)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* Section 6: 专题推荐 */}
+          {topics.length > 0 && (
+            <section aria-label="专题推荐" className="space-y-3.5 pt-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-1 h-4 rounded-full bg-[#ffd21c]" />
+                  <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                    专题推荐
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSelectChannel('专题')}
+                  className="text-xs text-slate-400 hover:text-[#ffd21c] inline-flex items-center gap-0.5 transition-colors group"
+                >
+                  <span>查看全部</span>
+                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-5">
+                {topics.slice(0, 3).map((topic, idx) => (
                   <button
-                    key={drama.id}
+                    key={topic.id}
                     type="button"
-                    onClick={() => onPlayDrama(drama)}
-                    className="group w-full text-left flex items-center gap-3.5 p-3 rounded-2xl bg-[#14161D] border border-white/[0.08] hover:border-amber-500/40 active:scale-[0.99] transition-all"
+                    onClick={() => {
+                      setSelectedTopic(topic);
+                      onPushHistoryLayer?.('topic-detail');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className={`group relative overflow-hidden rounded-2xl sm:rounded-3xl text-left border border-white/[0.08] hover:border-amber-500/40 active:scale-[0.99] transition-all min-h-[168px] sm:min-h-[200px] flex items-end ${
+                      idx === 0 ? 'md:col-span-2' : ''
+                    }`}
                   >
-                    <span
-                      className={`font-mono text-xl font-bold tabular-nums w-8 text-center shrink-0 ${
-                        isTopThree ? 'text-amber-400' : 'text-slate-500'
+                    <DramaCoverImage
+                      src={topic.coverUrl}
+                      alt={topic.title}
+                      fallbackId={topic.id}
+                      title={topic.title}
+                      compact
+                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#0B0C10]/95 via-[#0B0C10]/55 to-black/15" />
+
+                    <div className="relative z-10 p-4 sm:p-5 space-y-1 max-w-xl">
+                      <p className="text-xs text-amber-300 font-medium">
+                        {topic.accentNote}
+                      </p>
+                      <h3 className="text-base sm:text-lg font-bold text-white group-hover:text-amber-300 transition-colors">
+                        {topic.title}
+                      </h3>
+                      <p className="text-xs sm:text-sm text-slate-300 line-clamp-2">
+                        {topic.subtitle}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      ) : (
+        /* Channel / Tag / Filtered Grid View */
+        <>
+          {/* Drama Poster Grid */}
+          {!isRankingOnlyView && !isTopicsOnlyView && (
+            <section aria-label="剧集列表" className="space-y-3">
+              {sortedDramas.length === 0 ? (
+                <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] py-12 px-6 text-center space-y-3">
+                  <p className="text-sm font-medium text-slate-200">
+                    当前筛选条件下暂无剧集
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectChannel('全部');
+                      handleSelectGenre('全部');
+                    }}
+                    className="min-h-[44px] px-5 rounded-xl bg-amber-500 text-[#0B0C10] text-sm font-semibold hover:bg-amber-400 transition-colors"
+                  >
+                    查看全部剧集
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
+                  {sortedDramas.map((drama) => (
+                    <DramaPoster
+                      key={drama.id}
+                      drama={drama}
+                      onSelect={(item) => onPlayDrama(item)}
+                      onSelectTag={(tag) => handleSelectGenre(tag)}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Top Rankings Section */}
+          {(isRankingOnlyView || (!selectedTopic && !isTopicsOnlyView)) && (
+            <section aria-label="热播排行榜" className="space-y-4 pt-2">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg sm:text-xl font-bold text-white">热播排行榜</h2>
+
+                <div
+                  role="tablist"
+                  aria-label="排行榜分类"
+                  className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#14161D] border border-white/[0.08]"
+                >
+                  {(
+                    [
+                      { key: 'hot', label: '热播榜' },
+                      { key: 'new', label: '新剧榜' },
+                      { key: 'comic', label: '漫剧榜' },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={rankingTab === tab.key}
+                      onClick={() => setRankingTab(tab.key)}
+                      className={`min-h-[34px] px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                        rankingTab === tab.key
+                          ? 'bg-amber-500 text-[#0B0C10] font-semibold'
+                          : 'text-slate-300 hover:text-white'
                       }`}
                     >
-                      {rankNumber}
-                    </span>
-
-                    <div className="w-14 aspect-[3/4] rounded-xl overflow-hidden bg-[#1D202A] shrink-0">
-                      <DramaCoverImage
-                        src={drama.posterUrl}
-                        alt={drama.title}
-                        fallbackId={drama.id}
-                        title={drama.title}
-                        category={drama.category}
-                        compact
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <h3 className="text-sm font-semibold text-slate-100 group-hover:text-amber-400 transition-colors truncate">
-                        {drama.title}
-                      </h3>
-                      <p className="text-xs text-slate-400 line-clamp-1">
-                        {drama.tagline}
-                      </p>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono tabular-nums">
-                        <span className="inline-flex items-center gap-0.5 text-amber-300">
-                          <Flame className="w-3 h-3" aria-hidden="true" />
-                          {drama.heatScore}
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span>{drama.category}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>
-                          {drama.status === '已完结'
-                            ? `全${drama.totalEpisodes}集`
-                            : `更至${drama.updatedEpisodes}集`}
-                        </span>
-                      </div>
-                    </div>
-
-                    <ChevronRight
-                      className="w-4 h-4 text-slate-500 group-hover:text-amber-400 shrink-0"
-                      aria-hidden="true"
-                    />
-                  </button>
-                );
-              }
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* Curated Topics Section */}
-      {!selectedTopic && !isRankingOnlyView && topics.length > 0 && (
-        <section aria-label="专题推荐" className="space-y-4 pt-2">
-          <h2 className="text-lg sm:text-xl font-bold text-white">专题推荐</h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-5">
-            {topics.map((topic, idx) => (
-              <button
-                key={topic.id}
-                type="button"
-                onClick={() => {
-                  setSelectedTopic(topic);
-                  onPushHistoryLayer?.('topic-detail');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-                className={`group relative overflow-hidden rounded-2xl sm:rounded-3xl text-left border border-white/[0.08] hover:border-amber-500/40 active:scale-[0.99] transition-all min-h-[168px] sm:min-h-[210px] flex items-end ${
-                  idx === 0 ? 'md:col-span-2' : ''
-                }`}
-              >
-                <DramaCoverImage
-                  src={topic.coverUrl}
-                  alt={topic.title}
-                  fallbackId={topic.id}
-                  title={topic.title}
-                  compact
-                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0B0C10]/95 via-[#0B0C10]/55 to-black/15" />
-
-                <div className="relative z-10 p-4 sm:p-6 space-y-1 max-w-xl">
-                  <p className="text-xs text-amber-300 font-medium">
-                    {topic.accentNote}
-                  </p>
-                  <h3 className="text-base sm:text-xl font-bold text-white group-hover:text-amber-300 transition-colors">
-                    {topic.title}
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-300 line-clamp-2">
-                    {topic.subtitle}
-                  </p>
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
-              </button>
-            ))}
-          </div>
-        </section>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(isRankingOnlyView ? rankedDramas : rankedDramas.slice(0, 6)).map(
+                  (drama, index) => {
+                    const rankNumber = String(index + 1).padStart(2, '0');
+                    const isTopThree = index < 3;
+                    return (
+                      <button
+                        key={drama.id}
+                        type="button"
+                        onClick={() => onPlayDrama(drama)}
+                        className="group w-full text-left flex items-center gap-3.5 p-3 rounded-2xl bg-[#14161D] border border-white/[0.08] hover:border-amber-500/40 active:scale-[0.99] transition-all"
+                      >
+                        <span
+                          className={`font-mono text-xl font-bold tabular-nums w-8 text-center shrink-0 ${
+                            isTopThree ? 'text-amber-400' : 'text-slate-500'
+                          }`}
+                        >
+                          {rankNumber}
+                        </span>
+
+                        <div className="w-14 aspect-[3/4] rounded-xl overflow-hidden bg-[#1D202A] shrink-0">
+                          <DramaCoverImage
+                            src={drama.posterUrl}
+                            alt={drama.title}
+                            fallbackId={drama.id}
+                            title={drama.title}
+                            category={drama.category}
+                            compact
+                            className="h-full w-full object-cover"
+                          />
+                        </div>
+
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <h3 className="text-sm font-semibold text-slate-100 group-hover:text-amber-400 transition-colors truncate">
+                            {drama.title}
+                          </h3>
+                          <p className="text-xs text-slate-400 line-clamp-1">
+                            {drama.tagline}
+                          </p>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono tabular-nums">
+                            <span className="inline-flex items-center gap-0.5 text-amber-300">
+                              <Flame className="w-3 h-3" aria-hidden="true" />
+                              {drama.heatScore}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span>{drama.category}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>
+                              {drama.status === '已完结'
+                                ? `全${drama.totalEpisodes}集`
+                                : `更至${drama.updatedEpisodes}集`}
+                            </span>
+                          </div>
+                        </div>
+
+                        <ChevronRight
+                          className="w-4 h-4 text-slate-500 group-hover:text-amber-400 shrink-0"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    );
+                  }
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* Curated Topics Section */}
+          {(isTopicsOnlyView || (!selectedTopic && !isRankingOnlyView && topics.length > 0)) && (
+            <section aria-label="专题推荐" className="space-y-4 pt-2">
+              <h2 className="text-lg sm:text-xl font-bold text-white">专题推荐</h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-5">
+                {topics.map((topic, idx) => (
+                  <button
+                    key={topic.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTopic(topic);
+                      onPushHistoryLayer?.('topic-detail');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className={`group relative overflow-hidden rounded-2xl sm:rounded-3xl text-left border border-white/[0.08] hover:border-amber-500/40 active:scale-[0.99] transition-all min-h-[168px] sm:min-h-[210px] flex items-end ${
+                      idx === 0 ? 'md:col-span-2' : ''
+                    }`}
+                  >
+                    <DramaCoverImage
+                      src={topic.coverUrl}
+                      alt={topic.title}
+                      fallbackId={topic.id}
+                      title={topic.title}
+                      compact
+                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#0B0C10]/95 via-[#0B0C10]/55 to-black/15" />
+
+                    <div className="relative z-10 p-4 sm:p-6 space-y-1 max-w-xl">
+                      <p className="text-xs text-amber-300 font-medium">
+                        {topic.accentNote}
+                      </p>
+                      <h3 className="text-base sm:text-xl font-bold text-white group-hover:text-amber-300 transition-colors">
+                        {topic.title}
+                      </h3>
+                      <p className="text-xs sm:text-sm text-slate-300 line-clamp-2">
+                        {topic.subtitle}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+        </>
       )}
 
       {/* Official 9-Category Tags Bottom Sheet (huangguoai.com 全维度官方题材分类抽屉) */}

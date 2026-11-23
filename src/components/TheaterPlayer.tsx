@@ -1454,14 +1454,10 @@ export function TheaterPlayer({
       if (absDx > 16 && absDx > absDy * 1.25) {
         gestureTypeRef.current = 'seek';
       } else if (absDy > 14 && absDy > absDx * 1.15) {
-        if (effectiveLandscape || isFullscreen) {
-          if (start.startLocalX < start.stageW * 0.3) {
-            gestureTypeRef.current = 'brightness';
-          } else if (start.startLocalX > start.stageW * 0.7) {
-            gestureTypeRef.current = 'volume';
-          } else {
-            gestureTypeRef.current = 'swipe';
-          }
+        if (start.startLocalX < start.stageW * 0.3) {
+          gestureTypeRef.current = 'brightness';
+        } else if (start.startLocalX > start.stageW * 0.7) {
+          gestureTypeRef.current = 'volume';
         } else {
           gestureTypeRef.current = 'swipe';
         }

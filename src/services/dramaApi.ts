@@ -935,6 +935,91 @@ export async function loadDramaCatalog(config: ApiConfig): Promise<CatalogRespon
   };
 }
 
+export interface HomeSectionsData {
+  original: Drama[];
+  featured: Drama[];
+  latest: Drama[];
+  hot: Drama[];
+  topics: Topic[];
+}
+
+export function deriveHomeSections(dramas: Drama[], topics: Topic[]): HomeSectionsData {
+  // 1. 黄果原创: category === '黄果原创' or studio includes '原创'
+  const original = dramas.filter(
+    (d) => d.category === '黄果原创' || d.studio?.includes('原创')
+  );
+  const finalOriginal = original.length >= 4 ? original : dramas.slice(0, 6);
+
+  // 2. 精选推荐: isFeatured or rating >= 9.0
+  const featured = dramas.filter(
+    (d) => d.isFeatured || (d.rating && d.rating >= 9.0)
+  );
+  const finalFeatured =
+    featured.length >= 4
+      ? featured
+      : [...dramas].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 6);
+
+  // 3. 最近上新: isNew or recent
+  const latest = [...dramas].sort((a, b) => (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0)).slice(0, 8);
+
+  // 4. 热播短剧: sorted by heatScore descending
+  const hot = [...dramas].sort((a, b) => b.heatScore - a.heatScore).slice(0, 8);
+
+  return {
+    original: finalOriginal.slice(0, 6),
+    featured: finalFeatured.slice(0, 6),
+    latest,
+    hot,
+    topics,
+  };
+}
+
+export async function fetchHomeSections(
+  baseUrl?: string,
+  dramas: Drama[] = [],
+  topics: Topic[] = []
+): Promise<HomeSectionsData> {
+  const normalized = baseUrl ? normalizeBaseUrl(baseUrl) : '';
+  if (!normalized) {
+    return deriveHomeSections(dramas, topics);
+  }
+
+  try {
+    const res = await fetchJsonWithTimeout<{
+      data?: {
+        original?: HuangguoVideoItem[];
+        featured?: HuangguoVideoItem[];
+        latest?: HuangguoVideoItem[];
+        hot?: HuangguoVideoItem[];
+      };
+    }>(`${normalized}/api/site/home-sections`);
+
+    if (res?.data) {
+      const transform = (items?: HuangguoVideoItem[]) =>
+        (items || []).map((it, idx) => transformHuangguoItemToDrama(it, idx));
+
+      const original = transform(res.data.original);
+      const featured = transform(res.data.featured);
+      const latest = transform(res.data.latest);
+      const hot = transform(res.data.hot);
+
+      if (original.length || featured.length || latest.length || hot.length) {
+        return {
+          original: original.length ? original : dramas.slice(0, 6),
+          featured: featured.length ? featured : dramas.slice(0, 6),
+          latest: latest.length ? latest : dramas.slice(0, 8),
+          hot: hot.length ? hot : dramas.slice(0, 8),
+          topics,
+        };
+      }
+    }
+  } catch {
+    // Graceful fallback to deriving from loaded catalog
+  }
+
+  return deriveHomeSections(dramas, topics);
+}
+
 export async function testCustomApiEndpoint(baseUrl: string): Promise<{
   ok: boolean;
   message: string;

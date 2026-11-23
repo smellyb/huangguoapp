@@ -151,12 +151,20 @@ export function DramaCoverImage({
   );
 }
 
-interface DramaPosterProps {
+export interface DramaPosterProps {
   drama: Drama;
   onSelect: (drama: Drama) => void;
   onSelectTag?: (tag: string) => void;
   subtitle?: string;
   compact?: boolean;
+  badgeType?:
+    | 'original-new'
+    | 'original-hot'
+    | 'new'
+    | 'hot'
+    | 'original'
+    | 'none'
+    | 'auto';
 }
 
 export function DramaPoster({
@@ -165,7 +173,35 @@ export function DramaPoster({
   onSelectTag,
   subtitle,
   compact = false,
+  badgeType = 'auto',
 }: DramaPosterProps) {
+  const isOriginal =
+    badgeType === 'original-new' ||
+    badgeType === 'original-hot' ||
+    badgeType === 'original' ||
+    (badgeType === 'auto' &&
+      (drama.category === '黄果原创' || drama.studio?.includes('原创')));
+
+  const isNewBadge =
+    badgeType === 'original-new' ||
+    badgeType === 'new' ||
+    (badgeType === 'auto' && drama.isNew);
+
+  const isHotBadge =
+    badgeType === 'original-hot' ||
+    badgeType === 'hot' ||
+    (badgeType === 'auto' && !drama.isNew && drama.heatScore >= 8000);
+
+  const displayRating = drama.rating
+    ? drama.rating.toFixed(1)
+    : undefined;
+
+  const displayViews =
+    drama.playCountLabel ||
+    (drama.heatScore >= 10000
+      ? `${(drama.heatScore / 10000).toFixed(1)}W`
+      : `${drama.heatScore}`);
+
   return (
     <div
       role="button"
@@ -192,50 +228,61 @@ export function DramaPoster({
 
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent pointer-events-none" />
 
-        {/* Top Badges (原创, 新片) exactly as on huangguoai.com */}
-        <div className="absolute top-2 left-2 flex items-center gap-1 z-10 pointer-events-none">
-          {(drama.studio?.includes('原创') || drama.category === '黄果原创') && (
-            <span className="px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-[#ffd21c] text-[#0d0d0d] shadow-sm">
-              原创
-            </span>
-          )}
-          {drama.isNew && (
-            <span className="px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-rose-500 text-white shadow-sm">
-              新片
-            </span>
-          )}
-        </div>
+        {/* Top-Left Cover Badges matching .hg-drama-card__badges on huangguoai.com */}
+        {badgeType !== 'none' && (
+          <div className="hg-drama-card__badges absolute top-2 left-2 flex items-center gap-1 z-10 pointer-events-none">
+            {isOriginal && (
+              <span className="hg-drama-card__badge px-1.5 py-0.5 rounded-[3px] text-[10px] font-bold bg-[#ffd21c] text-[#0d0d0d] shadow-sm leading-tight">
+                原创
+              </span>
+            )}
+            {isNewBadge && (
+              <span className="hg-drama-card__badge hg-drama-card__badge--new px-1.5 py-0.5 rounded-[3px] text-[10px] font-medium bg-[#00b4d8] text-white shadow-sm leading-tight">
+                新片
+              </span>
+            )}
+            {isHotBadge && !isNewBadge && (
+              <span className="hg-drama-card__badge hg-drama-card__badge--hot px-1.5 py-0.5 rounded-[3px] text-[10px] font-medium bg-[#ff4757] text-white shadow-sm leading-tight">
+                热播
+              </span>
+            )}
+          </div>
+        )}
 
-        {/* Score Badge at bottom-right matching official .hg-drama-card__score */}
-        {Boolean(drama.rating) && (
-          <div className="absolute bottom-0 right-0 z-10 pointer-events-none">
-            <span className="px-2 py-0.5 rounded-tl-lg bg-gradient-to-r from-[#ffd21c] to-[#ffb800] text-[#0d0d0d] text-[11px] font-extrabold tracking-tight shadow-sm font-mono">
-              {drama.rating!.toFixed(1)}分
+        {/* Rating Score: Top-Right Corner in dark translucent pill matching huangguoai.com exactly */}
+        {displayRating && (
+          <div className="absolute top-2 right-2 z-10 pointer-events-none">
+            <span className="bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded text-[11px] font-bold font-mono text-[#ffd21c] shadow-sm">
+              {displayRating}分
             </span>
           </div>
         )}
 
+        {/* Center Hover Play Icon */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
           <span className="w-11 h-11 rounded-full bg-amber-500/95 text-[#0B0C10] flex items-center justify-center shadow-lg">
             <Play className="w-5 h-5 fill-current ml-0.5" aria-hidden="true" />
           </span>
         </div>
 
-        {/* Episode count & views matching official layout */}
-        <div className="absolute inset-x-0 bottom-0 p-2.5 pb-2 pointer-events-none">
+        {/* Bottom Overlays on Image: Bottom-left Flame Views + Bottom-right Episode status */}
+        <div className="absolute inset-x-0 bottom-0 p-2.5 pb-2 flex items-end justify-between gap-1 z-10 pointer-events-none">
           <div className="flex items-center gap-1 text-[11px] text-slate-200/95 font-medium tabular-nums drop-shadow">
+            <span className="text-amber-400">🔥</span>
+            <span>{displayViews}</span>
+          </div>
+
+          <div className="text-[11px] text-slate-200/95 font-medium tabular-nums drop-shadow text-right shrink-0">
             <span>
               {drama.status === '已完结'
-                ? `全 ${drama.totalEpisodes} 集`
+                ? `全${drama.totalEpisodes}集`
                 : `更新至${drama.updatedEpisodes || drama.totalEpisodes}集`}
             </span>
-            {drama.playCountLabel && (
-              <span className="text-amber-300/90 text-[10px]">· {drama.playCountLabel}</span>
-            )}
           </div>
         </div>
       </div>
 
+      {/* Under Image: Title & Official Tags */}
       <div className={compact ? 'mt-1.5 space-y-1' : 'mt-2 space-y-1'}>
         <h3 className="text-sm font-semibold text-slate-100 group-hover:text-amber-400 transition-colors line-clamp-1">
           {drama.title}

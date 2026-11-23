@@ -30,7 +30,7 @@ import {
   PUBLISH_PAGE_URL,
 } from '../services/publishLines';
 import type { ApiConfig, Drama, WatchHistoryEntry } from '../types/drama';
-import { DramaPoster } from './DramaPoster';
+import { DramaCoverImage, DramaPoster } from './DramaPoster';
 
 interface ProfileViewProps {
   dramas: Drama[];
@@ -261,13 +261,16 @@ export function ProfileView({
                         }
                         className="relative w-16 aspect-[3/4] rounded-xl overflow-hidden bg-[#1D202A] shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
                       >
-                        <img
+                        <DramaCoverImage
                           src={drama.posterUrl}
                           alt={drama.title}
-                          referrerPolicy="no-referrer"
+                          fallbackId={drama.id}
+                          title={drama.title}
+                          category={drama.category}
+                          compact
                           className="h-full w-full object-cover"
                         />
-                        <span className="absolute inset-0 bg-black/35 flex items-center justify-center">
+                        <span className="absolute inset-0 bg-black/35 flex items-center justify-center pointer-events-none">
                           <Play
                             className="w-5 h-5 text-white fill-current"
                             aria-hidden="true"

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Bookmark,
@@ -8,9 +8,9 @@ import {
   Play,
   Search,
 } from 'lucide-react';
-import { deriveRankings } from '../services/dramaApi';
+import { cleanCoverUrl, deriveRankings, getFallbackPoster } from '../services/dramaApi';
 import type { Drama, RankingType, Topic } from '../types/drama';
-import { DramaPoster } from './DramaPoster';
+import { DramaCoverImage, DramaPoster } from './DramaPoster';
 
 interface DiscoverViewProps {
   dramas: Drama[];
@@ -51,12 +51,59 @@ export function DiscoverView({
   const [activeFilter, setActiveFilter] = useState<FilterOption>('全部');
   const [rankingTab, setRankingTab] = useState<RankingType>('hot');
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
-  const [heroImgError, setHeroImgError] = useState(false);
 
   const featuredDrama = useMemo(
     () => dramas.find((d) => d.isFeatured) ?? dramas[0],
     [dramas]
   );
+
+  const heroSrc = featuredDrama ? (featuredDrama.heroUrl ?? featuredDrama.posterUrl) : '';
+  const [heroStage, setHeroStage] = useState<'primary' | 'clean' | 'fallback' | 'placeholder'>('primary');
+
+  useEffect(() => {
+    setHeroStage('primary');
+  }, [featuredDrama?.id, heroSrc]);
+
+  const cleanHeroSrc = useMemo(() => cleanCoverUrl(heroSrc), [heroSrc]);
+  const fallbackHeroSrc = useMemo(
+    () => (featuredDrama ? getFallbackPoster(featuredDrama.id) : ''),
+    [featuredDrama]
+  );
+
+  const currentHeroSrc = useMemo(() => {
+    switch (heroStage) {
+      case 'primary':
+        return heroSrc;
+      case 'clean':
+        return cleanHeroSrc;
+      case 'fallback':
+        return fallbackHeroSrc;
+      case 'placeholder':
+        return '';
+    }
+  }, [heroStage, heroSrc, cleanHeroSrc, fallbackHeroSrc]);
+
+  const handleHeroError = () => {
+    if (heroStage === 'primary') {
+      if (cleanHeroSrc && cleanHeroSrc !== heroSrc) {
+        setHeroStage('clean');
+        return;
+      }
+      if (fallbackHeroSrc && fallbackHeroSrc !== heroSrc) {
+        setHeroStage('fallback');
+        return;
+      }
+      setHeroStage('placeholder');
+    } else if (heroStage === 'clean') {
+      if (fallbackHeroSrc && fallbackHeroSrc !== cleanHeroSrc) {
+        setHeroStage('fallback');
+        return;
+      }
+      setHeroStage('placeholder');
+    } else {
+      setHeroStage('placeholder');
+    }
+  };
 
   const filteredDramas = useMemo(() => {
     if (selectedTopic) {
@@ -172,16 +219,19 @@ export function DiscoverView({
         featuredDrama && (
           <section className="relative overflow-hidden rounded-3xl bg-[#14161D] border border-white/[0.08]">
             <div className="relative min-h-[300px] sm:min-h-[380px] lg:min-h-[430px] flex items-end">
-              {!heroImgError ? (
+              {heroStage !== 'placeholder' && currentHeroSrc ? (
                 <img
-                  src={featuredDrama.heroUrl ?? featuredDrama.posterUrl}
+                  src={currentHeroSrc}
                   alt={featuredDrama.title}
                   referrerPolicy="no-referrer"
-                  onError={() => setHeroImgError(true)}
+                  onError={handleHeroError}
                   className="absolute inset-0 h-full w-full object-cover object-center"
                 />
               ) : (
-                <div className="absolute inset-0 bg-gradient-to-br from-[#1D202A] via-[#14161D] to-[#0B0C10]" />
+                <div
+                  data-testid="cover-placeholder"
+                  className="cover-placeholder absolute inset-0 bg-gradient-to-br from-[#1D202A] via-[#14161D] to-[#0B0C10]"
+                />
               )}
 
               <div className="absolute inset-0 bg-gradient-to-t from-[#0B0C10] via-[#0B0C10]/65 to-transparent" />
@@ -390,12 +440,13 @@ export function DiscoverView({
                     </span>
 
                     <div className="w-16 aspect-[3/4] rounded-xl overflow-hidden bg-[#1D202A] shrink-0">
-                      <img
+                      <DramaCoverImage
                         src={drama.posterUrl}
                         alt={drama.title}
-                        loading="lazy"
-                        decoding="async"
-                        referrerPolicy="no-referrer"
+                        fallbackId={drama.id}
+                        title={drama.title}
+                        category={drama.category}
+                        compact
                         className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                     </div>
@@ -457,12 +508,12 @@ export function DiscoverView({
                     idx === 0 ? 'md:col-span-2' : ''
                   }`}
                 >
-                  <img
+                  <DramaCoverImage
                     src={topic.coverUrl}
                     alt={topic.title}
-                    loading="lazy"
-                    decoding="async"
-                    referrerPolicy="no-referrer"
+                    fallbackId={topic.id}
+                    title={topic.title}
+                    compact
                     className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0B0C10]/95 via-[#0B0C10]/55 to-black/15" />

@@ -129,7 +129,12 @@ export default function App() {
             d.id === currentDramaId
               ? {
                   ...d,
-                  episodes: detail.episodes,
+                  posterUrl: detail.posterUrl || d.posterUrl,
+                  heroUrl: detail.posterUrl || d.heroUrl,
+                  episodes: detail.episodes.map((ep) => ({
+                    ...ep,
+                    posterUrl: ep.posterUrl || detail.posterUrl || d.posterUrl,
+                  })),
                   totalEpisodes: detail.totalEpisodes || detail.episodes.length,
                   synopsis: detail.synopsis || d.synopsis,
                 }

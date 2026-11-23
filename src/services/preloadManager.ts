@@ -15,6 +15,7 @@ function prefetchImage(url?: string): void {
   if (!url) return;
   const img = new Image();
   img.decoding = 'async';
+  img.referrerPolicy = 'no-referrer';
   img.src = url;
 }
 

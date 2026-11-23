@@ -33,7 +33,7 @@ import {
   X,
 } from 'lucide-react';
 import { episodeLikeKey } from '../hooks/useUserLibrary';
-import { fetchEpisodeStreamUrl } from '../services/dramaApi';
+import { cleanCoverUrl, fetchEpisodeStreamUrl, getFallbackPoster } from '../services/dramaApi';
 import {
   cancelPendingPreloads,
   isEpisodeWarmed,
@@ -977,6 +977,47 @@ export function TheaterPlayer({
     }
   };
 
+  // Fallback poster state with cleanCoverUrl and local demo poster fallback
+  const preferredPoster = useMemo(() => {
+    return effectiveLandscape && drama.heroUrl
+      ? drama.heroUrl
+      : (episode.posterUrl ?? drama.posterUrl);
+  }, [drama.heroUrl, drama.posterUrl, effectiveLandscape, episode.posterUrl]);
+
+  const [posterStage, setPosterStage] = useState<'primary' | 'clean' | 'fallback' | 'placeholder'>('primary');
+
+  useEffect(() => {
+    setPosterStage('primary');
+  }, [preferredPoster]);
+
+  const resolvedPosterUrl = useMemo(() => {
+    switch (posterStage) {
+      case 'primary':
+        return preferredPoster;
+      case 'clean':
+        return cleanCoverUrl(preferredPoster);
+      case 'fallback':
+        return getFallbackPoster(drama.id);
+      case 'placeholder':
+        return '';
+    }
+  }, [posterStage, preferredPoster, drama.id]);
+
+  const handlePosterError = () => {
+    if (posterStage === 'primary') {
+      const clean = cleanCoverUrl(preferredPoster);
+      if (clean && clean !== preferredPoster) {
+        setPosterStage('clean');
+        return;
+      }
+      setPosterStage('fallback');
+    } else if (posterStage === 'clean') {
+      setPosterStage('fallback');
+    } else {
+      setPosterStage('placeholder');
+    }
+  };
+
   // Pick visual frame: in landscape demo mode prefer widescreen hero visual when available
   const storyboardFrames = useMemo(() => {
     const base = episode.storyboardImages?.length
@@ -991,7 +1032,23 @@ export function TheaterPlayer({
   const sceneIndex =
     Math.floor((currentTime / Math.max(duration, 1)) * storyboardFrames.length) %
     storyboardFrames.length;
-  const activeFrameUrl = storyboardFrames[sceneIndex] ?? drama.posterUrl;
+
+  const [failedFrames, setFailedFrames] = useState<Set<string>>(() => new Set());
+  const rawActiveFrameUrl = storyboardFrames[sceneIndex] ?? drama.posterUrl;
+  const activeFrameUrl = useMemo(() => {
+    if (!failedFrames.has(rawActiveFrameUrl)) {
+      return rawActiveFrameUrl;
+    }
+    const clean = cleanCoverUrl(rawActiveFrameUrl);
+    if (!failedFrames.has(clean) && clean !== rawActiveFrameUrl) {
+      return clean;
+    }
+    return getFallbackPoster(drama.id);
+  }, [rawActiveFrameUrl, failedFrames, drama.id]);
+
+  const handleActiveFrameError = () => {
+    setFailedFrames((prev) => new Set(prev).add(rawActiveFrameUrl));
+  };
 
   const mediaFitClass = fitMode === 'contain' ? 'object-contain' : 'object-cover';
 
@@ -1048,18 +1105,30 @@ export function TheaterPlayer({
           )}
 
           {/* Poster-to-First-Frame Zero-Black-Flash Layer */}
-          <img
-            src={
-              effectiveLandscape && drama.heroUrl
-                ? drama.heroUrl
-                : (episode.posterUrl ?? drama.posterUrl)
-            }
-            alt={drama.title}
-            referrerPolicy="no-referrer"
-            className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
-              hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
-            }`}
-          />
+          {posterStage !== 'placeholder' && resolvedPosterUrl ? (
+            <img
+              src={resolvedPosterUrl}
+              alt={drama.title}
+              referrerPolicy="no-referrer"
+              onError={handlePosterError}
+              className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
+                hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
+              }`}
+            />
+          ) : (
+            <div
+              data-testid="cover-placeholder"
+              className={`cover-placeholder absolute inset-0 h-full w-full flex flex-col items-center justify-center p-6 bg-gradient-to-br from-[#1D202A] via-[#14161D] to-[#0B0C10] ${
+                hasExternalStream && videoReady ? 'opacity-0' : 'opacity-100'
+              }`}
+            >
+              <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-amber-400 mb-2">
+                <Play className="w-6 h-6 fill-current ml-0.5" aria-hidden="true" />
+              </div>
+              <span className="text-sm font-semibold text-slate-100 line-clamp-1">{drama.title}</span>
+              <span className="text-xs text-slate-400 mt-1">第 {episode.number} 集</span>
+            </div>
+          )}
 
           {/* Mode A: Real HLS / MP4 Video Stream */}
           {hasExternalStream ? (
@@ -1067,7 +1136,7 @@ export function TheaterPlayer({
               ref={videoRef}
               playsInline
               preload="auto"
-              poster={episode.posterUrl ?? drama.posterUrl}
+              poster={resolvedPosterUrl || undefined}
               onLoadedMetadata={(e) => {
                 const dur = e.currentTarget.duration;
                 if (Number.isFinite(dur) && dur > 0) setDuration(dur);
@@ -1115,6 +1184,7 @@ export function TheaterPlayer({
                 src={activeFrameUrl}
                 alt={`${drama.title} 第 ${episode.number} 集`}
                 referrerPolicy="no-referrer"
+                onError={handleActiveFrameError}
                 className={`h-full w-full ${mediaFitClass} ${
                   sceneIndex % 2 === 0 ? 'animate-cinema-in' : 'animate-cinema-out'
                 } ${!isPlaying ? 'cinema-paused' : ''}`}

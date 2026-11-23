@@ -19,19 +19,103 @@ export function normalizeBaseUrl(rawUrl: string): string {
 
 export function normalizeImageUrl(rawUrl?: string): string {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
-  const trimmed = rawUrl.trim();
+  const trimmed = rawUrl.trim().replace(/\\/g, '/');
   if (!trimmed) return '';
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
     return trimmed;
   }
   if (trimmed.startsWith('//')) {
     return `https:${trimmed}`;
+  }
+  if (trimmed.startsWith('http://')) {
+    // Automatically upgrade pic.qnlycc.cn HTTP to HTTPS to prevent mixed content blocking in HTTPS/mobile WebViews
+    if (trimmed.includes('pic.qnlycc.cn')) {
+      return trimmed.replace(/^http:\/\//, 'https://');
+    }
+    return trimmed;
+  }
+  if (trimmed.startsWith('https://')) {
+    return trimmed;
   }
   if (trimmed.startsWith('/')) {
     return `${DEFAULT_IMAGE_CDN}${trimmed}`;
   }
   return `${DEFAULT_IMAGE_CDN}/${trimmed}`;
 }
+
+/**
+ * Strips auth signatures (auth_key, sign, token, etc.) from CDN image URLs.
+ * If a signature expires (e.g. auth_key timestamp elapsed), pic.qnlycc.cn may reject with 403.
+ * Stripping the expired signature allows recovering the original static asset.
+ */
+export function cleanCoverUrl(rawUrl?: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const normalized = normalizeImageUrl(rawUrl);
+  if (!normalized) return '';
+  try {
+    const url = new URL(normalized);
+    const signatureParams = ['auth_key', 'sign', 'token', 'wsSecret', 'wsTime', 't', '_t'];
+    let changed = false;
+    for (const p of signatureParams) {
+      if (url.searchParams.has(p)) {
+        url.searchParams.delete(p);
+        changed = true;
+      }
+    }
+    if (!changed) return normalized;
+    const result = url.toString();
+    return result.endsWith('?') ? result.slice(0, -1) : result;
+  } catch {
+    return normalized
+      .replace(/[?&](auth_key|sign|token|wsSecret|wsTime|t|_t)=[^&]+/g, '')
+      .replace(/\?$/, '');
+  }
+}
+
+/**
+ * Returns a reliable bundled fallback poster from DEMO_DRAMAS by index or hash.
+ */
+export function getFallbackPoster(indexOrId?: number | string): string {
+  if (typeof indexOrId === 'number') {
+    return DEMO_DRAMAS[Math.abs(indexOrId) % DEMO_DRAMAS.length]?.posterUrl || DEMO_DRAMAS[0].posterUrl;
+  }
+  if (typeof indexOrId === 'string' && indexOrId) {
+    let hash = 0;
+    for (let i = 0; i < indexOrId.length; i++) {
+      hash = (hash << 5) - hash + indexOrId.charCodeAt(i);
+      hash |= 0;
+    }
+    return DEMO_DRAMAS[Math.abs(hash) % DEMO_DRAMAS.length]?.posterUrl || DEMO_DRAMAS[0].posterUrl;
+  }
+  return DEMO_DRAMAS[0].posterUrl;
+}
+
+/**
+ * Pure SVG data URI fallback placeholder for offline / broken covers.
+ */
+export const COVER_PLACEHOLDER_DATA_URL =
+  'data:image/svg+xml;charset=utf-8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" width="300" height="400">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#1D202A"/>
+          <stop offset="50%" stop-color="#14161D"/>
+          <stop offset="100%" stop-color="#0B0C10"/>
+        </linearGradient>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#bg)"/>
+      <g transform="translate(110, 150)" stroke="#F59E0B" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.8">
+        <rect x="2" y="2" width="76" height="60" rx="6"/>
+        <line x1="2" y1="20" x2="78" y2="20"/>
+        <line x1="22" y1="2" x2="14" y2="20"/>
+        <line x1="42" y1="2" x2="34" y2="20"/>
+        <line x1="62" y1="2" x2="54" y2="20"/>
+        <polygon points="34,32 50,42 34,52" fill="#F59E0B" opacity="0.9"/>
+      </g>
+      <text x="150" y="245" fill="#94A3B8" font-size="14" font-family="sans-serif" text-anchor="middle" font-weight="500">短剧封面</text>
+    </svg>`
+  );
 
 async function fetchJsonWithTimeout<T>(url: string): Promise<T> {
   const controller = new AbortController();
@@ -278,12 +362,13 @@ export async function fetchEpisodeStreamUrl(
 export async function fetchDramaDetail(
   baseUrl: string,
   dramaId: string
-): Promise<{ episodes: Episode[]; synopsis?: string; totalEpisodes?: number } | undefined> {
+): Promise<{ episodes: Episode[]; synopsis?: string; totalEpisodes?: number; posterUrl?: string } | undefined> {
   const base = normalizeBaseUrl(baseUrl);
   const url = `${base}/api/videos/${encodeURIComponent(dramaId)}`;
   try {
     const data = await fetchJsonWithTimeout<{
       data?: {
+        cover?: string;
         description?: string;
         episode_count?: number;
         episodes?: Array<{
@@ -296,17 +381,20 @@ export async function fetchDramaDetail(
     }>(url);
 
     if (data?.data?.episodes && data.data.episodes.length > 0) {
+      const cover = normalizeImageUrl(data.data.cover);
       const episodes: Episode[] = data.data.episodes.map((ep) => ({
         number: ep.ep_num,
         title: ep.title || `第 ${ep.ep_num} 集`,
         hook: '',
         durationSeconds: Number(ep.duration) || 90,
         subtitles: [],
+        posterUrl: cover || undefined,
       }));
       return {
         episodes,
         synopsis: data.data.description,
         totalEpisodes: data.data.episode_count || episodes.length,
+        posterUrl: cover || undefined,
       };
     }
   } catch (err) {

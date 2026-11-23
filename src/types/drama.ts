@@ -23,6 +23,17 @@ export interface QualityOption {
   bitrateKbps?: number;
 }
 
+export interface CdnAuthConfig {
+  m3u8Enabled?: boolean;
+  otherEnabled?: boolean;
+  authKey?: string;
+  authValue?: string;
+  app?: string;
+  imgEnabled?: boolean;
+  imgAuthKey?: string;
+  imgAuthValue?: string;
+}
+
 export interface Episode {
   number: number;
   title: string;
@@ -34,6 +45,7 @@ export interface Episode {
   qualities?: QualityOption[];
   storyboardImages?: string[];
   subtitles: SubtitleCue[];
+  cdn?: CdnAuthConfig;
 }
 
 export interface Drama {

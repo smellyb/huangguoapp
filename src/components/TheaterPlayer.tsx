@@ -14,6 +14,7 @@ import {
   Captions,
   ChevronDown,
   ChevronUp,
+  Film,
   Gauge,
   Heart,
   Layers,
@@ -33,13 +34,14 @@ import {
   X,
 } from 'lucide-react';
 import { episodeLikeKey } from '../hooks/useUserLibrary';
-import { cleanCoverUrl, fetchEpisodeStreamUrl, getFallbackPoster } from '../services/dramaApi';
+import { cleanCoverUrl, fetchEpisodePlayback, fetchEpisodeStreamUrl, getFallbackPoster } from '../services/dramaApi';
 import {
   cancelPendingPreloads,
   isEpisodeWarmed,
   preloadNextEpisode,
 } from '../services/preloadManager';
 import type {
+  CdnAuthConfig,
   Drama,
   Episode,
   PlaybackRate,
@@ -322,8 +324,17 @@ export function TheaterPlayer({
   );
 
   const [resolvedHlsUrl, setResolvedHlsUrl] = useState<string | undefined>(episode.hlsUrl);
-  const activeHlsUrl = episode.hlsUrl || resolvedHlsUrl;
-  const hasExternalStream = Boolean(activeHlsUrl || episode.videoUrl);
+  const [resolvedCdn, setResolvedCdn] = useState<CdnAuthConfig | undefined>(episode.cdn);
+  const [useFallbackPlayback, setUseFallbackPlayback] = useState(false);
+
+  // Reset fallback preference when user switches drama or episode
+  useEffect(() => {
+    setUseFallbackPlayback(false);
+  }, [drama.id, episode.number]);
+
+  const activeHlsUrl = useFallbackPlayback ? undefined : (episode.hlsUrl || resolvedHlsUrl);
+  const activeCdn = episode.cdn || resolvedCdn;
+  const hasExternalStream = Boolean(activeHlsUrl || (!useFallbackPlayback && episode.videoUrl));
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
@@ -347,6 +358,7 @@ export function TheaterPlayer({
 
     if (episode.hlsUrl) {
       setResolvedHlsUrl(episode.hlsUrl);
+      if (episode.cdn) setResolvedCdn(episode.cdn);
       setStreamError(null);
       return;
     }
@@ -355,19 +367,27 @@ export function TheaterPlayer({
       setIsBuffering(true);
       setStreamError(null);
 
-      fetchEpisodeStreamUrl(apiBaseUrl, drama.id, episode.number)
-        .then((stream) => {
+      fetchEpisodePlayback(apiBaseUrl, drama.id, episode.number)
+        .then((info) => {
           if (!active) return;
-          if (stream) {
-            episode.hlsUrl = stream;
-            setResolvedHlsUrl(stream);
+          if (info?.streamUrl) {
+            episode.hlsUrl = info.streamUrl;
+            if (info.cdn) episode.cdn = info.cdn;
+            setResolvedHlsUrl(info.streamUrl);
+            setResolvedCdn(info.cdn);
+            setStreamError(null);
           } else {
             setResolvedHlsUrl(undefined);
+            setResolvedCdn(undefined);
+            setStreamError('当前线路未能获取到有效视频流，建议切换极速直连线路或使用剧照预览播放。');
           }
         })
-        .catch(() => {
+        .catch((err) => {
           if (!active) return;
           setResolvedHlsUrl(undefined);
+          setResolvedCdn(undefined);
+          const msg = err instanceof Error ? err.message : '网络请求失败';
+          setStreamError(`视频流解析受阻 (${msg})，建议切换直连线路或使用剧照预览播放。`);
         })
         .finally(() => {
           if (active) setIsBuffering(false);
@@ -378,6 +398,7 @@ export function TheaterPlayer({
       };
     } else {
       setResolvedHlsUrl(undefined);
+      setResolvedCdn(undefined);
     }
   }, [apiBaseUrl, drama.id, episode, retryToken]);
 
@@ -626,9 +647,10 @@ export function TheaterPlayer({
     const remaining = duration - currentTime;
     if (ratio >= 0.6 || (duration > 20 && remaining <= 15)) {
       if (nextEpisode && !nextEpisode.hlsUrl && apiBaseUrl) {
-        fetchEpisodeStreamUrl(apiBaseUrl, drama.id, nextEpisode.number).then((stream) => {
-          if (stream) {
-            nextEpisode.hlsUrl = stream;
+        fetchEpisodePlayback(apiBaseUrl, drama.id, nextEpisode.number).then((info) => {
+          if (info?.streamUrl) {
+            nextEpisode.hlsUrl = info.streamUrl;
+            if (info.cdn) nextEpisode.cdn = info.cdn;
             preloadNextEpisode(drama.id, nextEpisode);
           }
         });
@@ -710,6 +732,22 @@ export function TheaterPlayer({
         capLevelToPlayerSize: true,
         fragLoadingTimeOut: 10000,
         manifestLoadingTimeOut: 8000,
+        xhrSetup: (xhr, url) => {
+          const cdn = activeCdn || episode.cdn;
+          if (cdn?.authKey && cdn.authValue) {
+            const path = String(url || '').split(/[?#]/)[0];
+            const isM3u8 = /\.m3u8$/i.test(path);
+            const isOther = /\.(?:ts|m4s|key)$/i.test(path);
+            if ((isM3u8 && cdn.m3u8Enabled !== false) || (isOther && cdn.otherEnabled)) {
+              try {
+                xhr.setRequestHeader(cdn.authKey, cdn.authValue);
+                if (cdn.app) xhr.setRequestHeader('x-cdn-app', cdn.app);
+              } catch {
+                // Ignore if header cannot be set in current state
+              }
+            }
+          }
+        },
       });
 
       hlsRef.current = hls;
@@ -750,7 +788,7 @@ export function TheaterPlayer({
         }
 
         setIsBuffering(false);
-        setStreamError('视频流加载受阻，请检查片源地址或 CORS 跨域设置。');
+        setStreamError('视频流加载受阻，建议切换其他直连线路或使用剧照预览播放。');
       });
 
       return () => {
@@ -1170,7 +1208,7 @@ export function TheaterPlayer({
               }}
               onError={() => {
                 setIsBuffering(false);
-                setStreamError('片源流无法播放，请检查视频链接格式或 CORS 配置。');
+                setStreamError('片源流无法直接播放，建议切换其他极速直连线路或使用剧照预览播放。');
               }}
               className={`absolute inset-0 h-full w-full ${mediaFitClass} transition-opacity duration-200 ${
                 videoReady ? 'opacity-100' : 'opacity-0'
@@ -1244,11 +1282,17 @@ export function TheaterPlayer({
 
           {/* Recoverable Stream Error Overlay */}
           {streamError && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/75 backdrop-blur-sm p-6">
-              <div className="max-w-xs w-full rounded-2xl bg-[#14161D] border border-white/10 p-5 text-center space-y-4">
-                <p className="text-sm text-slate-200 leading-relaxed">
-                  {streamError}
-                </p>
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-md p-6">
+              <div className="max-w-sm w-full rounded-2xl bg-[#14161D] border border-white/10 p-5 text-center space-y-4 shadow-2xl">
+                <div className="w-10 h-10 rounded-full bg-amber-500/15 text-amber-400 mx-auto flex items-center justify-center">
+                  <Film className="w-5 h-5" aria-hidden="true" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-sm font-semibold text-white">视频播放提示</h4>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {streamError}
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <button
                     type="button"
@@ -1256,20 +1300,33 @@ export function TheaterPlayer({
                       setStreamError(null);
                       setRetryToken((n) => n + 1);
                     }}
-                    className="min-h-[44px] w-full rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                    className="min-h-[42px] w-full rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0C10] text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors"
                   >
-                    <RefreshCw className="w-4 h-4" aria-hidden="true" />
-                    <span>重新加载片源</span>
+                    <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>重新解析 / 重试播放</span>
                   </button>
                   {onOpenLineSelector && (
                     <button
                       type="button"
-                      onClick={onOpenLineSelector}
-                      className="min-h-[40px] w-full rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-amber-300 text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
+                      onClick={() => {
+                        onOpenLineSelector();
+                      }}
+                      className="min-h-[38px] w-full rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/30 text-amber-300 text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      <span>切换其他直连线路</span>
+                      <span>切换其他直连极速线路</span>
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStreamError(null);
+                      setUseFallbackPlayback(true);
+                      onNotify('已切换至剧照预览播放模式');
+                    }}
+                    className="min-h-[38px] w-full rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-slate-300 text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <span>切换至剧照预览播放</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1307,6 +1364,24 @@ export function TheaterPlayer({
                   第 {episode.number} 集 <span aria-hidden="true">·</span>{' '}
                   {episode.title}
                 </p>
+                {useFallbackPlayback && (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/30 text-[10px] text-amber-300 font-medium">
+                      <Film className="w-2.5 h-2.5" />
+                      <span>剧照预览模式</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUseFallbackPlayback(false);
+                        setRetryToken((n) => n + 1);
+                      }}
+                      className="text-[10px] text-slate-400 hover:text-amber-300 underline underline-offset-2 transition-colors"
+                    >
+                      重试视频流
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

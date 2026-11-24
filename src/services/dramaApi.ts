@@ -600,9 +600,9 @@ export async function fetchEpisodePlayback(
         };
       };
       const stream = payload?.data?.streams?.main || payload?.data?.streams?.preview || payload?.data?.streams?.hevc;
-      if (stream) {
+      if (stream && typeof stream === 'string' && stream.trim().length > 0) {
         return {
-          streamUrl: stream,
+          streamUrl: stream.trim(),
           hevcUrl: payload.data?.streams?.hevc,
           previewUrl: payload.data?.streams?.preview,
           cdn: payload.data?.cdn,
@@ -631,9 +631,9 @@ export async function fetchEpisodePlayback(
         };
       };
       const stream = payload?.data?.streams?.main || payload?.data?.streams?.preview || payload?.data?.streams?.hevc;
-      if (stream) {
+      if (stream && typeof stream === 'string' && stream.trim().length > 0) {
         return {
-          streamUrl: stream,
+          streamUrl: stream.trim(),
           hevcUrl: payload.data?.streams?.hevc,
           previewUrl: payload.data?.streams?.preview,
           cdn: payload.data?.cdn,
@@ -642,7 +642,7 @@ export async function fetchEpisodePlayback(
       }
     }
 
-    // 3. 尝试公开 GET /api/videos/:id/play?ep=:ep
+    // 3. 尝试公开 GET /api/videos/:id/play?ep=:ep (严格校验非空且必须为有效 http/https 协议地址，避免返回空串导致重试无限缓冲)
     const playRes = await fetch(playGetEndpoint, {
       method: 'GET',
       headers: { Accept: 'application/json' },
@@ -655,10 +655,16 @@ export async function fetchEpisodePlayback(
           video_url_hevc?: string;
         };
       };
-      if (playPayload?.status === 1 && playPayload.data?.video_url) {
+      const rawUrl = playPayload?.data?.video_url;
+      if (
+        playPayload?.status === 1 &&
+        typeof rawUrl === 'string' &&
+        rawUrl.trim().length > 0 &&
+        (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))
+      ) {
         return {
-          streamUrl: playPayload.data.video_url,
-          hevcUrl: playPayload.data.video_url_hevc,
+          streamUrl: rawUrl.trim(),
+          hevcUrl: playPayload.data?.video_url_hevc,
         };
       }
     }
@@ -1171,7 +1177,8 @@ export async function fetchChannelDramas(
   channel: DramaCategory | string,
   page: number = 1,
   sortMode: 'new' | 'hot' = 'new',
-  size: number = 24
+  size: number = 24,
+  subFilter?: string
 ): Promise<ChannelDramasResult> {
   const activeBase = normalizeBaseUrl(baseUrl || 'https://huangguoai.com');
   if (!activeBase) {
@@ -1182,6 +1189,11 @@ export async function fetchChannelDramas(
       filtered = DEMO_DRAMAS.filter((d) => d.category === '漫剧');
     } else if (channel === '黄果原创') {
       filtered = DEMO_DRAMAS.filter((d) => d.category === '黄果原创' || d.studio.includes('原创'));
+      if (subFilter === 'manju') {
+        filtered = filtered.filter((d) => d.category === '漫剧');
+      } else if (subFilter === 'duanju') {
+        filtered = filtered.filter((d) => d.category === '短剧');
+      }
     } else if (channel === '排行榜') {
       filtered = [...DEMO_DRAMAS].sort((a, b) => b.heatScore - a.heatScore);
     }
@@ -1199,25 +1211,42 @@ export async function fetchChannelDramas(
   params.set('page', String(page));
   params.set('size', String(size));
 
+  // 子筛选优先级高于全局排序 ('hot' | 'recommended' -> sort=hot, 'latest' -> sort=new)
+  let effectiveSort = sortMode;
+  if (subFilter === 'hot' || subFilter === 'recommended') {
+    effectiveSort = 'hot';
+  } else if (subFilter === 'latest') {
+    effectiveSort = 'new';
+  }
+
   if (channel === '短剧') {
     params.set('cate_id', '24');
-    params.set('sort', sortMode);
+    params.set('sort', effectiveSort);
   } else if (channel === '漫剧') {
     params.set('cate_id', '25');
-    params.set('sort', sortMode);
+    params.set('sort', effectiveSort);
   } else if (channel === 'AI换脸') {
     params.set('cate_id', '26');
-    params.set('sort', sortMode);
+    params.set('sort', effectiveSort);
   } else if (channel === 'AI魔改') {
     params.set('cate_id', '27');
-    params.set('sort', sortMode);
+    params.set('sort', effectiveSort);
   } else if (channel === '黄果原创') {
+    // 对齐 huangguoai.com 官方频道:
+    // /original/ -> is_original=1
+    // /original/manju/ -> is_original=1&cate_id=25
+    // /original/duanju/ -> is_original=1&cate_id=24
     params.set('is_original', '1');
-    params.set('sort', sortMode);
+    if (subFilter === 'manju') {
+      params.set('cate_id', '25');
+    } else if (subFilter === 'duanju') {
+      params.set('cate_id', '24');
+    }
+    params.set('sort', effectiveSort);
   } else if (channel === '排行榜') {
     params.set('sort', 'hot');
   } else {
-    params.set('sort', sortMode);
+    params.set('sort', effectiveSort);
   }
 
   const url = `${activeBase}/api/videos?${params.toString()}`;

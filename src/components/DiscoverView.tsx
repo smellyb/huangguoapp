@@ -146,6 +146,11 @@ export function DiscoverView({
       if (selectedCategory === '全部') {
         setSelectedGenre('全部');
       }
+      if (selectedCategory === '黄果原创') {
+        setChannelSubFilter('all');
+      } else {
+        setChannelSubFilter('latest');
+      }
     }
   }, [selectedCategory, activeChannel]);
 
@@ -236,7 +241,8 @@ export function DiscoverView({
       activeChannel,
       1,
       sortMode === 'hot' ? 'hot' : 'new',
-      24
+      24,
+      channelSubFilter
     )
       .then((res) => {
         if (!active) return;
@@ -257,7 +263,7 @@ export function DiscoverView({
     return () => {
       active = false;
     };
-  }, [activeChannel, sortMode, apiBaseUrl, selectedGenre]);
+  }, [activeChannel, sortMode, apiBaseUrl, selectedGenre, channelSubFilter]);
 
   const handleLoadMoreChannel = () => {
     if (isLoadingMore || !channelHasMore) return;
@@ -269,7 +275,8 @@ export function DiscoverView({
       activeChannel,
       nextPage,
       sortMode === 'hot' ? 'hot' : 'new',
-      24
+      24,
+      channelSubFilter
     )
       .then((res) => {
         setChannelRemoteDramas((prev) => [...prev, ...res.dramas]);
@@ -289,6 +296,13 @@ export function DiscoverView({
     setActiveChannel(channel);
     setSelectedTopic(null);
     setSelectedGenre('全部');
+    setChannelPage(1);
+    setChannelRemoteDramas([]);
+    if (channel === '黄果原创') {
+      setChannelSubFilter('all');
+    } else {
+      setChannelSubFilter('latest');
+    }
     onSelectCategory?.(channel);
   };
 
@@ -615,7 +629,11 @@ export function DiscoverView({
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setChannelSubFilter(p.id as any)}
+                  onClick={() => {
+                    setChannelSubFilter(p.id as any);
+                    setChannelPage(1);
+                    setChannelRemoteDramas([]);
+                  }}
                   className={`min-h-[34px] px-3.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
                     active
                       ? 'bg-amber-400 text-[#0B0C10] shadow-md shadow-amber-500/20'
@@ -759,7 +777,11 @@ export function DiscoverView({
                       ? '精选推荐的AI成人漫剧'
                       : '最新更新的AI成人漫剧'
                     : activeChannel === '黄果原创'
-                    ? '精选独家原创短剧与漫剧'
+                    ? channelSubFilter === 'manju'
+                      ? '黄果独家原创漫剧'
+                      : channelSubFilter === 'duanju'
+                      ? '黄果独家原创短剧'
+                      : '精选独家原创短剧与漫剧'
                     : '最新更新短剧'}
                 </h2>
                 {isTagLoading || isChannelLoading ? (

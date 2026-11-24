@@ -162,7 +162,9 @@ public class Media3PlayerPlugin extends Plugin {
                     mPlayerView = new PlayerView(context);
                     mPlayerView.setUseController(false);
                     mPlayerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
-                    mPlayerView.setBackgroundColor(Color.BLACK);
+                    mPlayerView.setShutterBackgroundColor(Color.TRANSPARENT);
+                    mPlayerView.setKeepContentOnPlayerReset(true);
+                    mPlayerView.setBackgroundColor(Color.TRANSPARENT);
 
                     ViewGroup parent = (ViewGroup) getBridge().getWebView().getParent();
                     if (parent != null) {
@@ -172,6 +174,13 @@ public class Media3PlayerPlugin extends Plugin {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         ));
+                    }
+                } else {
+                    mPlayerView.setShutterBackgroundColor(Color.TRANSPARENT);
+                    mPlayerView.setKeepContentOnPlayerReset(true);
+                    mPlayerView.setBackgroundColor(Color.TRANSPARENT);
+                    if (getBridge() != null && getBridge().getWebView() != null) {
+                        getBridge().getWebView().setBackgroundColor(Color.TRANSPARENT);
                     }
                 }
 

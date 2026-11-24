@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { App as CapApp } from '@capacitor/app';
 import { Clapperboard, Compass, Play, Search, User, Wifi } from 'lucide-react';
 import { DiscoverView } from './components/DiscoverView';
 import { LineSelectorModal } from './components/LineSelectorModal';
@@ -81,6 +82,7 @@ export default function App() {
   const [currentDramaId, setCurrentDramaId] = useState<string>(
     state.watchHistory[0]?.dramaId ?? ''
   );
+  const [selectedDrama, setSelectedDrama] = useState<Drama | null>(null);
   const [currentEpisodeNumber, setCurrentEpisodeNumber] = useState<number>(
     state.watchHistory[0]?.episodeNumber ?? 1
   );
@@ -95,6 +97,7 @@ export default function App() {
   const returnTabRef = useRef<AppTab>(returnTab);
   const lineModalOpenRef = useRef<boolean>(isLineModalOpen);
   const overlayBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const lastBackPressTimeRef = useRef<number>(0);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -207,8 +210,14 @@ export default function App() {
   }, [state.apiConfig.mode, state.apiConfig.baseUrl]);
 
   const activeDrama = useMemo(
-    () => dramas.find((d) => d.id === currentDramaId) ?? dramas[0] ?? null,
-    [dramas, currentDramaId]
+    () =>
+      (currentDramaId && selectedDrama?.id === currentDramaId
+        ? selectedDrama
+        : dramas.find((d) => d.id === currentDramaId)) ??
+      selectedDrama ??
+      dramas[0] ??
+      null,
+    [selectedDrama, dramas, currentDramaId]
   );
 
   // Automatically fetch full episode list for remote dramas
@@ -247,6 +256,9 @@ export default function App() {
 
   const openTheater = useCallback(
     (drama: Drama, episodeNum?: number, startSeconds?: number) => {
+      setSelectedDrama(drama);
+      setDramas((prev) => (prev.some((d) => d.id === drama.id) ? prev : [drama, ...prev]));
+
       const saved = state.watchHistory.find((entry) => entry.dramaId === drama.id);
       const targetEp = episodeNum ?? saved?.episodeNumber ?? 1;
       const targetTime =
@@ -274,6 +286,70 @@ export default function App() {
     setActiveTab(returnTabRef.current || 'discover');
   }, []);
 
+  // Capacitor Android 原生硬件返回键多级优先级拦截调度
+  useEffect(() => {
+    let removeListener: (() => void) | undefined;
+
+    CapApp.addListener('backButton', () => {
+      // 1. 优先关闭活动浮层（模态弹窗、底部选线/剧集抽屉）
+      if (lineModalOpenRef.current) {
+        setIsLineModalOpen(false);
+        return;
+      }
+      if (overlayBackHandlerRef.current && overlayBackHandlerRef.current()) {
+        return;
+      }
+
+      // 2. 剧场播放模式下返回前序浏览界面
+      if (activeTabRef.current === 'theater') {
+        exitTheater();
+        return;
+      }
+
+      // 3. 非首页（搜索/排行榜/专题/我的）状态下返回发现主页
+      if (activeTabRef.current !== 'discover') {
+        setActiveTab('discover');
+        return;
+      }
+
+      // 4. 处于发现主页根视图时，2秒内双击物理返回键退出应用
+      const now = Date.now();
+      if (now - lastBackPressTimeRef.current < 2000) {
+        CapApp.exitApp();
+      } else {
+        lastBackPressTimeRef.current = now;
+        showToast('再按一次退出应用');
+      }
+    })
+      .then((handle) => {
+        removeListener = () => {
+          handle.remove();
+        };
+      })
+      .catch((err) => {
+        console.warn('[App] Failed to bind Capacitor backButton listener:', err);
+      });
+
+    return () => {
+      removeListener?.();
+    };
+  }, [exitTheater, showToast]);
+
+  // 剧场模式下全局 DOM 背景置为透明，使底层 Android 原生 Media3 (ExoPlayer) SurfaceView 完全透出
+  useEffect(() => {
+    if (activeTab === 'theater') {
+      document.documentElement.classList.add('theater-mode');
+      document.body.classList.add('theater-mode');
+    } else {
+      document.documentElement.classList.remove('theater-mode');
+      document.body.classList.remove('theater-mode');
+    }
+    return () => {
+      document.documentElement.classList.remove('theater-mode');
+      document.body.classList.remove('theater-mode');
+    };
+  }, [activeTab]);
+
   const openSearchTab = useCallback(() => {
     if (activeTabRef.current !== 'search') {
       pushHistoryLayer('search');
@@ -287,8 +363,9 @@ export default function App() {
       setCurrentDramaId(dramaId);
       setCurrentEpisodeNumber(episodeNum);
       setResumeSeconds(startSeconds);
+      setSelectedDrama((prev) => (prev?.id === dramaId ? prev : dramas.find((d) => d.id === dramaId) ?? prev));
     },
-    []
+    [dramas]
   );
 
   const handleToggleFollow = useCallback(
@@ -329,7 +406,11 @@ export default function App() {
   }, [activeDrama, dramas, latestWatched, openTheater]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#0B0C10] text-[#F8FAFC]">
+    <div
+      className={`min-h-screen flex flex-col text-[#F8FAFC] ${
+        activeTab === 'theater' ? 'bg-transparent' : 'bg-[#0B0C10]'
+      }`}
+    >
       {/* Desktop Top Bar */}
       <header className="hidden md:block sticky top-0 z-30 h-16 bg-[#0B0C10]/95 backdrop-blur-md border-b border-white/[0.08]">
         <div className="max-w-7xl mx-auto h-full px-6 lg:px-8 flex items-center justify-between gap-8">

@@ -1,4 +1,5 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { App as CapApp } from '@capacitor/app';
 import {
   Bookmark,
   CheckCircle2,
@@ -96,10 +97,21 @@ export function ProfileView({
   const [apiInput, setApiInput] = useState(apiConfig.baseUrl);
   const [testing, setTesting] = useState(false);
   const [showDevDocs, setShowDevDocs] = useState(false);
+  const [appVersion, setAppVersion] = useState('2.3.0');
   const [testResult, setTestResult] = useState<{
     ok: boolean;
     message: string;
   } | null>(null);
+
+  useEffect(() => {
+    CapApp.getInfo()
+      .then((info) => {
+        if (info?.version) {
+          setAppVersion(info.version);
+        }
+      })
+      .catch(() => null);
+  }, []);
 
   const dramaMap = useMemo(
     () => new Map(dramas.map((d) => [d.id, d])),
@@ -623,6 +635,29 @@ export function ProfileView({
           </div>
         </div>
       )}
+      {/* App Version Info Footer */}
+      <div className="rounded-2xl bg-[#14161D] border border-white/[0.08] p-4 sm:p-5 flex items-center justify-between gap-3 text-xs text-slate-400">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 font-bold text-sm">
+            HG
+          </div>
+          <div>
+            <div className="font-semibold text-white text-sm">黄果短剧</div>
+            <div className="text-[11px] text-slate-500 font-mono">
+              Android 原生客户端 · Media3 硬件加速
+            </div>
+          </div>
+        </div>
+        <div className="text-right">
+          <span className="inline-block px-3 py-1 rounded-full bg-white/[0.06] border border-white/10 text-amber-400 font-mono font-semibold text-xs">
+            v{appVersion}
+          </span>
+          <div className="text-[10px] text-emerald-400 mt-1 flex items-center justify-end gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
+            <span>已是最新版本</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

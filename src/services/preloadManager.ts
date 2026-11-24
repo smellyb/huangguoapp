@@ -139,7 +139,18 @@ export async function preloadNextEpisode(
     // 3. Warm HLS stream playlist + first segment
     if (nextEpisode.hlsUrl) {
       if (isNativeMedia3Available()) {
+        const headers: Record<string, string> = {};
+        if (nextEpisode.cdn?.authKey && nextEpisode.cdn.authValue) {
+          headers[nextEpisode.cdn.authKey] = nextEpisode.cdn.authValue;
+        }
+        if (nextEpisode.cdn?.app) {
+          headers['x-cdn-app'] = nextEpisode.cdn.app;
+        }
         Media3Player.preload({ streamUrl: nextEpisode.hlsUrl }).catch(() => null);
+        Media3Player.prepareNext({
+          streamUrl: nextEpisode.hlsUrl,
+          headers: Object.keys(headers).length > 0 ? headers : undefined,
+        }).catch(() => null);
       }
       await warmHlsStream(nextEpisode.hlsUrl, nextEpisode.cdn, controller.signal);
       warmedKeys.add(key);
@@ -149,7 +160,18 @@ export async function preloadNextEpisode(
     // 4. Warm MP4 direct stream first 512KB
     if (nextEpisode.videoUrl) {
       if (isNativeMedia3Available()) {
+        const headers: Record<string, string> = {};
+        if (nextEpisode.cdn?.authKey && nextEpisode.cdn.authValue) {
+          headers[nextEpisode.cdn.authKey] = nextEpisode.cdn.authValue;
+        }
+        if (nextEpisode.cdn?.app) {
+          headers['x-cdn-app'] = nextEpisode.cdn.app;
+        }
         Media3Player.preload({ streamUrl: nextEpisode.videoUrl }).catch(() => null);
+        Media3Player.prepareNext({
+          streamUrl: nextEpisode.videoUrl,
+          headers: Object.keys(headers).length > 0 ? headers : undefined,
+        }).catch(() => null);
       }
       await fetch(nextEpisode.videoUrl, {
         method: 'GET',

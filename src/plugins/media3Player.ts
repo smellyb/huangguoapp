@@ -32,8 +32,16 @@ export interface PlayerErrorEvent {
   errorCode: number;
 }
 
+export interface NextPreparedEvent {
+  slot: number;
+  streamUrl: string;
+}
+
 export interface Media3PlayerPlugin {
   initPlayer(options: InitPlayerOptions): Promise<{ success: boolean; streamUrl: string }>;
+  prepareNext(options: { streamUrl: string; headers?: Record<string, string> }): Promise<{ success: boolean; slot: number; streamUrl: string }>;
+  switchToNext(options: { streamUrl?: string; autoPlay?: boolean; headers?: Record<string, string> }): Promise<{ success: boolean; zeroDelayHit: boolean; activeSlot: number }>;
+  vibrate(options?: { type?: 'light' | 'medium' | 'heavy' | 'selection' }): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
   seekTo(options: { seconds: number }): Promise<void>;
@@ -71,12 +79,20 @@ export interface Media3PlayerPlugin {
     listenerFunc: (event: PlayerErrorEvent) => void
   ): Promise<PluginListenerHandle>;
 
+  addListener(
+    eventName: 'nextPrepared',
+    listenerFunc: (event: NextPreparedEvent) => void
+  ): Promise<PluginListenerHandle>;
+
   removeAllListeners(): Promise<void>;
 }
 
 const Media3Player = registerPlugin<Media3PlayerPlugin>('Media3Player', {
   web: () => ({
     initPlayer: async () => ({ success: false, streamUrl: '' }),
+    prepareNext: async () => ({ success: false, slot: 0, streamUrl: '' }),
+    switchToNext: async () => ({ success: false, zeroDelayHit: false, activeSlot: 0 }),
+    vibrate: async () => {},
     play: async () => {},
     pause: async () => {},
     seekTo: async () => {},

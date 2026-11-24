@@ -1028,6 +1028,14 @@ export function TheaterPlayer({
 
   const handleNextEpisodeOrDrama = useCallback(() => {
     if (nextEpisode) {
+      if (useNativeMedia3) {
+        const nextStream = nextEpisode.hlsUrl || nextEpisode.videoUrl;
+        if (nextStream) {
+          Media3Player.switchToNext({ streamUrl: nextStream, autoPlay: true }).catch(() => null);
+        } else {
+          Media3Player.vibrate({ type: 'light' }).catch(() => null);
+        }
+      }
       onSelectDramaEpisode(drama.id, nextEpisode.number, 0);
       onNotify(`第 ${nextEpisode.number} 集`);
       return;
@@ -1036,10 +1044,13 @@ export function TheaterPlayer({
     const currentIdx = dramas.findIndex((item) => item.id === drama.id);
     const nextDrama = dramas[(currentIdx + 1) % dramas.length];
     if (nextDrama && nextDrama.id !== drama.id) {
+      if (useNativeMedia3) {
+        Media3Player.vibrate({ type: 'medium' }).catch(() => null);
+      }
       onSelectDramaEpisode(nextDrama.id, 1, 0);
       onNotify(`切换至《${nextDrama.title}》`);
     }
-  }, [drama.id, dramas, nextEpisode, onNotify, onSelectDramaEpisode]);
+  }, [drama.id, dramas, nextEpisode, onNotify, onSelectDramaEpisode, useNativeMedia3]);
 
   const handlePrevEpisodeOrDrama = useCallback(() => {
     if (episode.number > 1) {
@@ -1392,6 +1403,7 @@ export function TheaterPlayer({
       currentTimeRef.current = seconds;
       if (useNativeMedia3) {
         Media3Player.seekTo({ seconds }).catch(() => null);
+        Media3Player.vibrate({ type: 'selection' }).catch(() => null);
       } else if (hasExternalStream && videoRef.current) {
         videoRef.current.currentTime = seconds;
       }
@@ -1554,7 +1566,9 @@ export function TheaterPlayer({
         setHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
       }, 850);
 
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      if (useNativeMedia3) {
+        Media3Player.vibrate({ type: 'medium' }).catch(() => null);
+      } else if (typeof navigator !== 'undefined' && navigator.vibrate) {
         navigator.vibrate(20);
       }
 
@@ -1593,7 +1607,9 @@ export function TheaterPlayer({
         } else if (videoRef.current) {
           videoRef.current.playbackRate = 2.0;
         }
-        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        if (useNativeMedia3) {
+          Media3Player.vibrate({ type: 'selection' }).catch(() => null);
+        } else if (typeof navigator !== 'undefined' && navigator.vibrate) {
           navigator.vibrate(18);
         }
       }

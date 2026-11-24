@@ -97,7 +97,7 @@ export function ProfileView({
   const [apiInput, setApiInput] = useState(apiConfig.baseUrl);
   const [testing, setTesting] = useState(false);
   const [showDevDocs, setShowDevDocs] = useState(false);
-  const [appVersion, setAppVersion] = useState('2.4.0');
+  const [appVersion, setAppVersion] = useState('2.5.0');
   const [testResult, setTestResult] = useState<{
     ok: boolean;
     message: string;
@@ -644,7 +644,7 @@ export function ProfileView({
           <div>
             <div className="font-semibold text-white text-sm">黄果短剧</div>
             <div className="text-[11px] text-slate-500 font-mono">
-              Android 原生客户端 · Media3 硬件级横竖屏切换
+              Android 原生客户端 · Media3 双核交叉池 0ms 秒开
             </div>
           </div>
         </div>

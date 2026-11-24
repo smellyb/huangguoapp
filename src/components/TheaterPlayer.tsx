@@ -58,6 +58,7 @@ import {
   isEpisodeWarmed,
   preloadNextEpisode,
 } from '../services/preloadManager';
+import { Capacitor } from '@capacitor/core';
 import Media3Player, { isNativeMedia3Available } from '../plugins/media3Player';
 import type {
   CdnAuthConfig,
@@ -577,6 +578,7 @@ export function TheaterPlayer({
   }, [apiBaseUrl, drama.id, episode, retryToken]);
 
   // Native Media3 (AndroidX ExoPlayer) Availability Check
+  const isCapacitor = useMemo(() => Capacitor.isNativePlatform(), []);
   const useNativeMedia3 = useMemo(() => isNativeMedia3Available(), []);
 
   // Fullscreen & Landscape Cinema Modes
@@ -652,7 +654,7 @@ export function TheaterPlayer({
       const w = window.innerWidth;
       const h = window.innerHeight;
       setIsPortraitMobile(w < 768 && h > w);
-      setIsDeviceLandscape(w > h && h <= 560);
+      setIsDeviceLandscape(w > h && (isCapacitor || h <= 720));
     };
 
     updateViewportState();
@@ -706,11 +708,22 @@ export function TheaterPlayer({
   }, [isFullscreen, isLandscape, isPortraitMobile, isDeviceLandscape]);
 
   const effectiveLandscape = isLandscape || isDeviceLandscape;
-  // When user requests landscape on a portrait mobile screen, CSS 90deg fallback engages
-  // automatically if native orientation lock did not rotate the viewport to landscape.
-  const isRotatedMobileLandscape = isLandscape && isPortraitMobile;
+  // On native Android with Media3, rotation is handled at the Activity window level;
+  // CSS 90deg fallback engages ONLY in web/fallback when native orientation lock cannot rotate viewport.
+  const isRotatedMobileLandscape = !useNativeMedia3 && isLandscape && isPortraitMobile;
+  const isImmersiveLandscape =
+    effectiveLandscape && (isCapacitor || window.innerWidth <= 1024 || isDeviceLandscape || isFullscreen);
   const isImmersiveOverlay =
     isFullscreen || isRotatedMobileLandscape || isDeviceLandscape;
+
+  const isLandscapeMedia = mediaAspectRatio !== null && mediaAspectRatio > 1.05;
+  const effectiveFit: 'contain' | 'cover' =
+    fitMode === 'auto'
+      ? isLandscapeMedia || effectiveLandscape
+        ? 'contain'
+        : 'cover'
+      : fitMode;
+  const mediaFitClass = effectiveFit === 'contain' ? 'object-contain' : 'object-cover';
 
   // Lock body scroll on mobile theater & immersive overlays so background never bounces
   useEffect(() => {
@@ -829,9 +842,13 @@ export function TheaterPlayer({
       setIsLandscape(true);
       onPushHistoryLayer?.('landscape');
 
-      // On portrait mobile, attempt true OS fullscreen + landscape lock first;
-      // if orientation lock is unsupported/blocked, exit portrait fullscreen cleanly so CSS 90deg fallback takes over.
-      if (isPortraitMobile) {
+      if (isNativeMedia3Available()) {
+        try {
+          await Media3Player.setOrientation({ orientation: 'landscape' });
+        } catch (e) {
+          console.warn('Native orientation lock failed', e);
+        }
+      } else if (isPortraitMobile) {
         let enteredNativeFs = false;
         if (stageRef.current?.requestFullscreen && !document.fullscreenElement) {
           try {
@@ -873,6 +890,13 @@ export function TheaterPlayer({
       landscapeUsedFullscreenRef.current = false;
       setIsLandscape(false);
       setIsFullscreen(false);
+      if (isNativeMedia3Available()) {
+        try {
+          await Media3Player.setOrientation({ orientation: 'portrait' });
+        } catch (e) {
+          console.warn('Native orientation reset failed', e);
+        }
+      }
       try {
         orientationApi?.unlock?.();
       } catch {
@@ -1053,6 +1077,7 @@ export function TheaterPlayer({
       autoPlay: isPlaying,
       startSeconds: initialTimeSeconds > 0 ? initialTimeSeconds : 0,
       headers: Object.keys(headers).length > 0 ? headers : undefined,
+      resizeMode: effectiveFit === 'cover' ? 'zoom' : 'fit',
     }).catch((err) => {
       if (active) {
         console.warn('[TheaterPlayer] Media3 init failed:', err);
@@ -1135,14 +1160,24 @@ export function TheaterPlayer({
     retryToken,
   ]);
 
-  // Cleanup native player on unmount
+  // Cleanup native player and reset orientation on unmount
   useEffect(() => {
     return () => {
       if (useNativeMedia3) {
+        Media3Player.setOrientation({ orientation: 'portrait' }).catch(() => null);
         Media3Player.destroy().catch(() => null);
       }
     };
   }, [useNativeMedia3]);
+
+  // Synchronize effectiveFit resize mode to native Media3 player
+  useEffect(() => {
+    if (useNativeMedia3) {
+      Media3Player.setResizeMode({
+        mode: effectiveFit === 'cover' ? 'zoom' : 'fit',
+      }).catch(() => null);
+    }
+  }, [effectiveFit, useNativeMedia3]);
 
   // HLS / MP4 playback lifecycle (Web / Hls.js fallback)
   useEffect(() => {
@@ -1860,26 +1895,15 @@ export function TheaterPlayer({
     }
   }, []);
 
-  const isLandscapeMedia = mediaAspectRatio !== null && mediaAspectRatio > 1.05;
-  const effectiveFit: 'contain' | 'cover' =
-    fitMode === 'auto'
-      ? isLandscapeMedia || effectiveLandscape
-        ? 'contain'
-        : 'cover'
-      : fitMode;
-  const mediaFitClass = effectiveFit === 'contain' ? 'object-contain' : 'object-cover';
-
   // Full 100dvh on portrait mobile (no bottom nav fighting for space!); spacious cinema stage on desktop
   const stageBg = useNativeMedia3 ? 'bg-transparent' : 'bg-black';
   const stageContainerClass = isRotatedMobileLandscape
     ? `fixed top-1/2 left-1/2 z-50 w-[100dvh] h-[100vw] -translate-x-1/2 -translate-y-1/2 rotate-90 origin-center rounded-none border-0 ${stageBg}`
-    : isFullscreen
+    : isFullscreen || isImmersiveLandscape
       ? `fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 ${stageBg}`
-      : isDeviceLandscape
-        ? `fixed inset-0 z-50 w-screen h-[100dvh] rounded-none border-0 ${stageBg}`
-        : isLandscape
-          ? `relative w-full aspect-video max-h-[78dvh] rounded-2xl lg:rounded-3xl ${stageBg} border border-white/[0.1]`
-          : `relative w-full h-[100dvh] md:h-[calc(100dvh-96px)] lg:h-[calc(100dvh-116px)] lg:max-h-[820px] lg:w-[430px] xl:w-[460px] lg:rounded-3xl ${stageBg} border-0 lg:border lg:border-white/[0.1] shrink-0`;
+      : isLandscape
+        ? `relative w-full aspect-video max-h-[78dvh] rounded-2xl lg:rounded-3xl ${stageBg} border border-white/[0.1]`
+        : `relative w-full h-[100dvh] md:h-[calc(100dvh-96px)] lg:h-[calc(100dvh-116px)] lg:max-h-[820px] lg:w-[430px] xl:w-[460px] lg:rounded-3xl ${stageBg} border-0 lg:border lg:border-white/[0.1] shrink-0`;
 
   const showSideEpisodeDrawer = isFullscreen || effectiveLandscape;
   const isControlsVisible = !isCleanMode && hudVisible;

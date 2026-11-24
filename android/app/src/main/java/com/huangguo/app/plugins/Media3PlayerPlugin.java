@@ -1,6 +1,7 @@
 package com.huangguo.app.plugins;
 
 import android.content.Context;
+import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Handler;
@@ -158,10 +159,18 @@ public class Media3PlayerPlugin extends Plugin {
                 mPlayer = new ExoPlayer.Builder(context, renderersFactory).build();
 
                 // 4. Setup View hierarchy: place PlayerView UNDER the transparent WebView
+                String initialResizeMode = call.getString("resizeMode", "fit");
+                int targetResizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT;
+                if ("zoom".equalsIgnoreCase(initialResizeMode)) {
+                    targetResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM;
+                } else if ("fill".equalsIgnoreCase(initialResizeMode)) {
+                    targetResizeMode = AspectRatioFrameLayout.RESIZE_MODE_FILL;
+                }
+
                 if (mPlayerView == null) {
                     mPlayerView = new PlayerView(context);
                     mPlayerView.setUseController(false);
-                    mPlayerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
+                    mPlayerView.setResizeMode(targetResizeMode);
                     mPlayerView.setShutterBackgroundColor(Color.TRANSPARENT);
                     mPlayerView.setKeepContentOnPlayerReset(true);
                     mPlayerView.setBackgroundColor(Color.TRANSPARENT);
@@ -176,6 +185,7 @@ public class Media3PlayerPlugin extends Plugin {
                         ));
                     }
                 } else {
+                    mPlayerView.setResizeMode(targetResizeMode);
                     mPlayerView.setShutterBackgroundColor(Color.TRANSPARENT);
                     mPlayerView.setKeepContentOnPlayerReset(true);
                     mPlayerView.setBackgroundColor(Color.TRANSPARENT);
@@ -424,9 +434,59 @@ public class Media3PlayerPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setOrientation(PluginCall call) {
+        String orientation = call.getString("orientation", "portrait");
+        if (getActivity() == null) {
+            call.reject("Activity is not available");
+            return;
+        }
+
+        getActivity().runOnUiThread(() -> {
+            try {
+                if ("landscape".equalsIgnoreCase(orientation)) {
+                    getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                } else if ("portrait".equalsIgnoreCase(orientation)) {
+                    getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                } else if ("sensor".equalsIgnoreCase(orientation) || "auto".equalsIgnoreCase(orientation)) {
+                    getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+                } else {
+                    getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                }
+                call.resolve();
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to set requested orientation: " + e.getMessage(), e);
+                call.reject("Failed to set requested orientation: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void getOrientation(PluginCall call) {
+        if (getActivity() == null) {
+            call.reject("Activity is not available");
+            return;
+        }
+
+        int current = getActivity().getRequestedOrientation();
+        String name = "portrait";
+        if (current == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
+            current == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE ||
+            current == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE ||
+            current == ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE) {
+            name = "landscape";
+        }
+        JSObject ret = new JSObject();
+        ret.put("orientation", name);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
     public void destroy(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             stopProgressTimer();
+            if (getActivity() != null) {
+                getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            }
             if (mPlayer != null) {
                 mPlayer.stop();
                 mPlayer.release();
@@ -450,6 +510,9 @@ public class Media3PlayerPlugin extends Plugin {
     protected void handleOnDestroy() {
         super.handleOnDestroy();
         stopProgressTimer();
+        if (getActivity() != null) {
+            getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        }
         if (mPlayer != null) {
             mPlayer.release();
             mPlayer = null;

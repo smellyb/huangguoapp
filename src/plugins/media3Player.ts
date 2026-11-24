@@ -5,6 +5,7 @@ export interface InitPlayerOptions {
   autoPlay?: boolean;
   startSeconds?: number;
   headers?: Record<string, string>;
+  resizeMode?: 'fit' | 'zoom' | 'fill';
 }
 
 export interface PlaybackStateEvent {
@@ -41,6 +42,8 @@ export interface Media3PlayerPlugin {
   setResizeMode(options: { mode: 'fit' | 'zoom' | 'fill' }): Promise<void>;
   preload(options: { streamUrl: string }): Promise<void>;
   setVisibility(options: { visible: boolean }): Promise<void>;
+  setOrientation(options: { orientation: 'landscape' | 'portrait' | 'sensor' | 'auto' }): Promise<void>;
+  getOrientation(): Promise<{ orientation: 'landscape' | 'portrait' }>;
   destroy(): Promise<void>;
 
   addListener(
@@ -82,6 +85,8 @@ const Media3Player = registerPlugin<Media3PlayerPlugin>('Media3Player', {
     setResizeMode: async () => {},
     preload: async () => {},
     setVisibility: async () => {},
+    setOrientation: async () => {},
+    getOrientation: async () => ({ orientation: 'portrait' as const }),
     destroy: async () => {},
     addListener: async () => ({ remove: async () => {} }),
     removeAllListeners: async () => {},

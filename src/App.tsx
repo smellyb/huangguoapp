@@ -9,6 +9,7 @@ import { TheaterPlayer } from './components/TheaterPlayer';
 import { useUserLibrary } from './hooks/useUserLibrary';
 import { fetchDramaDetail, loadDramaCatalog } from './services/dramaApi';
 import { DEFAULT_PERMANENT_DOMAINS, DEFAULT_SPEED_LINES } from './services/publishLines';
+import Media3Player, { isNativeMedia3Available } from './plugins/media3Player';
 import type { AppTab, Drama, Topic } from './types/drama';
 
 interface DesktopNavItem {
@@ -284,6 +285,9 @@ export default function App() {
 
   const exitTheater = useCallback(() => {
     setActiveTab(returnTabRef.current || 'discover');
+    if (isNativeMedia3Available()) {
+      Media3Player.setOrientation({ orientation: 'portrait' }).catch(() => null);
+    }
   }, []);
 
   // Capacitor Android 原生硬件返回键多级优先级拦截调度
